@@ -1,0 +1,87 @@
+name: Build d8 (Debug)
+
+on:
+  workflow_dispatch:
+    inputs:
+      v8_version:
+        description: 'V8 version (e.g., 11.0.0). Leave empty for latest.'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: var77/v8-docker-build:latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Download and compile V8
+        run: |
+          set -e
+          
+          # Get latest version if not specified
+          if [ -z "${{ github.event.inputs.v8_version }}" ]; then
+            echo "Fetching latest V8 version..."
+            V8_VERSION=$(curl -s https://chromiumdash.appspot.com/fetch/milestones | jq -r '.[0].components[] | select(.name == "V8") | .versions[-1].branch_base' 2>/dev/null || echo "")
+            
+            if [ -z "$V8_VERSION" ]; then
+              V8_VERSION="13.0.0"
+              echo "Using default version: $V8_VERSION"
+            fi
+          else
+            V8_VERSION="${{ github.event.inputs.v8_version }}"
+          fi
+          
+          echo "Building V8 version: $V8_VERSION"
+          
+          # Clone depot_tools
+          if [ ! -d "depot_tools" ]; then
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          fi
+          export PATH="$PATH:$PWD/depot_tools"
+          
+          # Create working directory
+          mkdir -p build && cd build
+          
+          # Fetch V8
+          fetch v8
+          cd v8
+          
+          # Checkout specific version if specified
+          if [ -n "$V8_VERSION" ]; then
+            git checkout "$V8_VERSION" || true
+          fi
+          
+          # Install dependencies
+          ./tools/dev/v8gen.py x64.release
+          
+          # Create debug build configuration
+          cat > args.gn << 'EOF'
+          is_debug = true
+          is_component_build = false
+          v8_static_library = true
+          symbol_level = 2
+          v8_enable_sandbox = false
+          v8_optimized_debug = false
+          v8_enable_gdbjit = true
+          treat_warnings_as_errors = false
+          v8_use_external_startup_data = false
+          use_custom_libcxx = false
+          EOF
+          
+          # Build
+          gn gen out.gn/x64.debug
+          ninja -C out.gn/x64.debug d8
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: d8-debug-${{ github.event.inputs.v8_version || 'latest' }}
+          path: |
+            build/v8/out.gn/x64.debug/d8
+            build/v8/out.gn/x64.debug/*.so
+          retention-days: 90
