@@ -1,36 +1,44 @@
-# V8 d8 Builder
+# V8 d8 Debug Builder
 
-Prebuilt d8 (V8's developer shell) for vulnerability research and CTF competitions.
+Prebuilt d8 (V8's developer shell) **debug versions** for vulnerability research and CTF competitions.
+
+## Why Debug?
+
+- **Google 官方提供 release 版本**: https://storage.googleapis.com/chromium-v8/official/canary/
+- **Debug 版本优势**:
+  - 完整的调试符号
+  - 禁用沙箱 (`v8_enable_sandbox = false`)
+  - 禁用优化调试 (`v8_optimized_debug = false`)
+  - 启用 GDB JIT 接口
+  - 更适合漏洞分析和利用开发
 
 ## Features
 
-- **Auto-release** - Builds automatically published to GitHub Releases
+- **Auto-release** - Debug builds automatically published to GitHub Releases
 - **V8 version tracking** - Each build tagged with V8 commit hash
-- **Release + Debug Symbols** - Optimized for vulnerability research (default)
-- **Debug builds** - Full debug symbols for development
+- **On-demand builds** - Build any V8 version via GitHub Actions
 
 ## Version Tracking
 
 ### Tag Format
 ```
-v8-{commit_short}-{build_type}
+v8-{commit_short}-debug
 ```
 
 Examples:
 ```
-v8-609a85c-release
 v8-609a85c-debug
-v8-a1b2c3d-release
+v8-a1b2c3d-debug
 ```
 
 ### Release Name Format
 ```
-V8 {version} d8 ({build_type}) - {commit_short}
+V8 {version} d8 (debug) - {commit_short}
 ```
 
 Examples:
 ```
-V8 13.0.0 d8 (release) - 609a85c
+V8 13.0.0 d8 (debug) - 609a85c
 V8 d8 (debug) - a1b2c3d
 ```
 
@@ -45,33 +53,24 @@ V8 d8 (debug) - a1b2c3d
 ### Build Specific Version
 
 1. Go to [Actions](../../actions)
-2. Click "Build d8" workflow
+2. Click "Build d8 (Debug)" workflow
 3. Click "Run workflow"
-4. Fill in parameters:
-   - **Build type**: `release` or `debug`
-   - **V8 version**: Git commit hash or version (optional)
+4. Enter V8 version (optional)
 5. Wait for build (~30 minutes)
 6. Release will be created automatically
 
-## Build Types
+## Build Configuration
 
-### Release + Symbols (Recommended)
-```gn
-is_debug = false
-symbol_level = 2
-v8_optimized_debug = false
-v8_enable_backtrace = true
-```
-Best for: Exploit development, CTF, vulnerability research
-
-### Debug
 ```gn
 is_debug = true
 symbol_level = 2
 v8_enable_sandbox = false
+v8_optimized_debug = false
 v8_enable_gdbjit = true
+v8_enable_backtrace = true
+v8_enable_disassembler = true
+v8_enable_object_print = true
 ```
-Best for: Development, debugging V8 internals
 
 ## Examples
 
@@ -80,28 +79,25 @@ Best for: Development, debugging V8 internals
 ```bash
 # Trigger build
 gh workflow run build-d8.yml \
-  -f build_type=release \
   -f v8_version=609a85c2a1bd77d6f6905369f4bc4fcf34c5db09
 
 # Check status
 gh run list --workflow=build-d8.yml
 
 # Download from release
-gh release download v8-609a85c-release
+gh release download v8-609a85c-debug
 ```
 
 ### Latest Debug Version
 
 ```bash
-gh workflow run build-d8.yml -f build_type=debug
+gh workflow run build-d8.yml
 ```
 
 ### Specific V8 Version
 
 ```bash
-gh workflow run build-d8.yml \
-  -f build_type=release \
-  -f v8_version=13.0.0
+gh workflow run build-d8.yml -f v8_version=13.0.0
 ```
 
 ## Usage
@@ -120,17 +116,6 @@ gdb ./d8
 ./d8 --trace-opt --trace-deopt test.js
 ```
 
-## Release Structure
-
-Each release includes:
-- `d8` - Main binary
-- `*.so` - Shared libraries (if any)
-- Release notes with:
-  - V8 version and commit hash
-  - Build type
-  - Build configuration
-  - Usage instructions
-
 ## API Access
 
 ### List all releases
@@ -141,7 +126,7 @@ gh release list
 ### Download specific release
 ```bash
 # By tag
-gh release download v8-609a85c-release
+gh release download v8-609a85c-debug
 
 # Latest release
 gh release download
@@ -149,7 +134,7 @@ gh release download
 
 ### Get release info
 ```bash
-gh release view v8-609a85c-release
+gh release view v8-609a85c-debug
 ```
 
 ## Search Releases
@@ -157,9 +142,6 @@ gh release view v8-609a85c-release
 ```bash
 # Search by V8 version
 gh release list | grep "V8 13.0.0"
-
-# Search by build type
-gh release list | grep "(release)"
 
 # Search by commit
 gh release list | grep "609a85c"

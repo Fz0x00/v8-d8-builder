@@ -1,4 +1,4 @@
-name: Build d8
+name: Build d8 (Debug)
 
 on:
   workflow_dispatch:
@@ -8,14 +8,6 @@ on:
         required: false
         default: ''
         type: string
-      build_type:
-        description: 'Build type: release (with symbols) or debug'
-        required: false
-        default: 'release'
-        type: choice
-        options:
-          - release
-          - debug
 
 permissions:
   contents: write
@@ -37,7 +29,6 @@ jobs:
         run: |
           set -e
           
-          BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
           V8_VERSION="${{ github.event.inputs.v8_version || '' }}"
           
           # Clone depot_tools
@@ -81,14 +72,14 @@ jobs:
           echo "V8 commit message: $V8_COMMIT_MSG"
           echo "V8 version string: ${V8_VERSION_STRING:-unknown}"
           
-          # Generate tag: v8-{commit_short}-{build_type}
-          TAG="v8-${V8_COMMIT_SHORT}-${BUILD_TYPE}"
+          # Generate tag: v8-{commit_short}-debug
+          TAG="v8-${V8_COMMIT_SHORT}-debug"
           
           # Generate release name
           if [ -n "$V8_VERSION_STRING" ]; then
-            RELEASE_NAME="V8 ${V8_VERSION_STRING} d8 (${BUILD_TYPE}) - ${V8_COMMIT_SHORT}"
+            RELEASE_NAME="V8 ${V8_VERSION_STRING} d8 (debug) - ${V8_COMMIT_SHORT}"
           else
-            RELEASE_NAME="V8 d8 (${BUILD_TYPE}) - ${V8_COMMIT_SHORT}"
+            RELEASE_NAME="V8 d8 (debug) - ${V8_COMMIT_SHORT}"
           fi
           
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
@@ -98,7 +89,6 @@ jobs:
           echo "V8_COMMIT_MSG=$V8_COMMIT_MSG" >> $GITHUB_OUTPUT
           echo "V8_COMMIT_DATE=$V8_COMMIT_DATE" >> $GITHUB_OUTPUT
           echo "V8_VERSION_STRING=${V8_VERSION_STRING:-unknown}" >> $GITHUB_OUTPUT
-          echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_OUTPUT
           
           echo "Tag: $TAG"
           echo "Release name: $RELEASE_NAME"
@@ -107,10 +97,9 @@ jobs:
         run: |
           set -e
           
-          BUILD_TYPE="${{ steps.v8_info.outputs.BUILD_TYPE }}"
           V8_VERSION="${{ github.event.inputs.v8_version || '' }}"
           
-          echo "Build type: $BUILD_TYPE"
+          echo "Building debug d8"
           echo "V8 version: ${V8_VERSION:-latest}"
           
           # Clone depot_tools
@@ -137,34 +126,9 @@ jobs:
           
           echo "Current V8 commit: $(git log -1 --format='%H %s')"
           
-          # Create build configuration based on build type
-          if [ "$BUILD_TYPE" = "release" ]; then
-            echo "Using Release + Symbols configuration"
-            cat > args.gn << 'EOF'
-          is_component_build = false
-          is_debug = false
-          symbol_level = 2
-          blink_symbol_level = 2
-          v8_symbol_level = 2
-          perfetto_force_dcheck = "off"
-          dcheck_always_on = false
-          v8_enable_backtrace = true
-          v8_enable_fast_mksnapshot = true
-          v8_enable_slow_dchecks = false
-          v8_optimized_debug = false
-          v8_enable_disassembler = true
-          v8_enable_object_print = true
-          v8_enable_verify_heap = true
-          enable_cet_shadow_stack = false
-          v8_static_library = true
-          v8_use_external_startup_data = false
-          use_custom_libcxx = false
-          treat_warnings_as_errors = false
-          EOF
-            BUILD_DIR="out.gn/x64.release"
-          else
-            echo "Using Debug configuration"
-            cat > args.gn << 'EOF'
+          # Debug build configuration
+          echo "Using Debug configuration"
+          cat > args.gn << 'EOF'
           is_component_build = false
           is_debug = true
           v8_static_library = true
@@ -180,23 +144,21 @@ jobs:
           v8_use_external_startup_data = false
           use_custom_libcxx = false
           EOF
-            BUILD_DIR="out.gn/x64.debug"
-          fi
           
           # Generate build files
           echo "Generating build files..."
-          gn gen "$BUILD_DIR"
+          gn gen out.gn/x64.debug
           
           # Build d8
           echo "Building d8..."
-          ninja -C "$BUILD_DIR" d8
+          ninja -C out.gn/x64.debug d8
           
           echo "Build completed!"
-          ls -lh "$BUILD_DIR/d8"
+          ls -lh out.gn/x64.debug/d8
           
           # Copy d8 to root for release
-          cp "$BUILD_DIR/d8" ./d8
-          cp "$BUILD_DIR"/*.so ./ 2>/dev/null || true
+          cp out.gn/x64.debug/d8 ./d8
+          cp out.gn/x64.debug/*.so ./ 2>/dev/null || true
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -204,10 +166,9 @@ jobs:
           tag_name: ${{ steps.v8_info.outputs.TAG }}
           name: ${{ steps.v8_info.outputs.RELEASE_NAME }}
           body: |
-            ## V8 d8 Build
+            ## V8 d8 Debug Build
             
             **V8 Version:** ${{ steps.v8_info.outputs.V8_VERSION_STRING }}
-            **Build Type:** ${{ steps.v8_info.outputs.BUILD_TYPE }}
             **V8 Commit:** [`${{ steps.v8_info.outputs.V8_COMMIT_SHORT }}`](https://chromium.googlesource.com/v8/v8/+/${{ steps.v8_info.outputs.V8_COMMIT }})
             **Commit Message:** ${{ steps.v8_info.outputs.V8_COMMIT_MSG }}
             **Build Date:** ${{ github.event.repository.updated_at }}
@@ -215,13 +176,13 @@ jobs:
             ### Build Configuration
             
             ```gn
-            ${{ steps.v8_info.outputs.BUILD_TYPE == 'release' && 'is_debug = false
-            symbol_level = 2
-            v8_optimized_debug = false
-            v8_enable_backtrace = true' || 'is_debug = true
+            is_debug = true
             symbol_level = 2
             v8_enable_sandbox = false
-            v8_enable_gdbjit = true' }}
+            v8_enable_gdbjit = true
+            v8_enable_backtrace = true
+            v8_enable_disassembler = true
+            v8_enable_object_print = true
             ```
             
             ### Usage
