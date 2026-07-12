@@ -16,11 +16,6 @@ on:
         options:
           - release
           - debug
-      custom_tag:
-        description: 'Custom tag (e.g., CVE-2025-5419). Leave empty for auto-generated tag.'
-        required: false
-        default: ''
-        type: string
 
 permissions:
   contents: write
@@ -44,7 +39,6 @@ jobs:
           
           BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
           V8_VERSION="${{ github.event.inputs.v8_version || '' }}"
-          CUSTOM_TAG="${{ github.event.inputs.custom_tag || '' }}"
           
           # Clone depot_tools
           if [ ! -d "depot_tools" ]; then
@@ -74,23 +68,40 @@ jobs:
           V8_COMMIT_MSG=$(git log -1 --format='%s')
           V8_COMMIT_DATE=$(git log -1 --format='%cd' --date=format:'%Y%m%d')
           
+          # Try to get V8 version from BUILD.gn
+          V8_VERSION_TAG=$(grep -oP 'v8_major = \K\d+' BUILD.gn 2>/dev/null || echo "")
+          if [ -n "$V8_VERSION_TAG" ]; then
+            V8_VERSION_FULL=$(grep -oP 'v8_major = \d+\s+v8_minor = \K\d+' BUILD.gn 2>/dev/null || echo "0")
+            V8_VERSION_STRING="${V8_VERSION_TAG}.${V8_VERSION_FULL}"
+          else
+            V8_VERSION_STRING=""
+          fi
+          
           echo "V8 commit: $V8_COMMIT"
           echo "V8 commit message: $V8_COMMIT_MSG"
+          echo "V8 version string: ${V8_VERSION_STRING:-unknown}"
           
-          # Generate tag
-          if [ -n "$CUSTOM_TAG" ]; then
-            TAG="$CUSTOM_TAG"
+          # Generate tag: v8-{commit_short}-{build_type}
+          TAG="v8-${V8_COMMIT_SHORT}-${BUILD_TYPE}"
+          
+          # Generate release name
+          if [ -n "$V8_VERSION_STRING" ]; then
+            RELEASE_NAME="V8 ${V8_VERSION_STRING} d8 (${BUILD_TYPE}) - ${V8_COMMIT_SHORT}"
           else
-            TAG="d8-${BUILD_TYPE}-${V8_COMMIT_DATE}-${V8_COMMIT_SHORT}"
+            RELEASE_NAME="V8 d8 (${BUILD_TYPE}) - ${V8_COMMIT_SHORT}"
           fi
           
           echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_OUTPUT
           echo "V8_COMMIT=$V8_COMMIT" >> $GITHUB_OUTPUT
           echo "V8_COMMIT_SHORT=$V8_COMMIT_SHORT" >> $GITHUB_OUTPUT
           echo "V8_COMMIT_MSG=$V8_COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "V8_COMMIT_DATE=$V8_COMMIT_DATE" >> $GITHUB_OUTPUT
+          echo "V8_VERSION_STRING=${V8_VERSION_STRING:-unknown}" >> $GITHUB_OUTPUT
           echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_OUTPUT
           
           echo "Tag: $TAG"
+          echo "Release name: $RELEASE_NAME"
       
       - name: Download and compile V8
         run: |
@@ -191,13 +202,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.v8_info.outputs.TAG }}
-          name: "V8 d8 ${{ steps.v8_info.outputs.BUILD_TYPE }} - ${{ steps.v8_info.outputs.V8_COMMIT_SHORT }}"
+          name: ${{ steps.v8_info.outputs.RELEASE_NAME }}
           body: |
             ## V8 d8 Build
             
+            **V8 Version:** ${{ steps.v8_info.outputs.V8_VERSION_STRING }}
             **Build Type:** ${{ steps.v8_info.outputs.BUILD_TYPE }}
-            **V8 Commit:** ${{ steps.v8_info.outputs.V8_COMMIT }}
-            **V8 Commit Message:** ${{ steps.v8_info.outputs.V8_COMMIT_MSG }}
+            **V8 Commit:** [`${{ steps.v8_info.outputs.V8_COMMIT_SHORT }}`](https://chromium.googlesource.com/v8/v8/+/${{ steps.v8_info.outputs.V8_COMMIT }})
+            **Commit Message:** ${{ steps.v8_info.outputs.V8_COMMIT_MSG }}
             **Build Date:** ${{ github.event.repository.updated_at }}
             
             ### Build Configuration
