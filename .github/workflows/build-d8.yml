@@ -1,4 +1,4 @@
-name: Build d8 (Release with Symbols)
+name: Build d8
 
 on:
   workflow_dispatch:
@@ -16,6 +16,14 @@ on:
         options:
           - release
           - debug
+      custom_tag:
+        description: 'Custom tag (e.g., CVE-2025-5419). Leave empty for auto-generated tag.'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -26,12 +34,69 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get V8 commit info
+        id: v8_info
+        run: |
+          set -e
+          
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
+          V8_VERSION="${{ github.event.inputs.v8_version || '' }}"
+          CUSTOM_TAG="${{ github.event.inputs.custom_tag || '' }}"
+          
+          # Clone depot_tools
+          if [ ! -d "depot_tools" ]; then
+            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          fi
+          export PATH="$PATH:$PWD/depot_tools"
+          
+          # Create working directory
+          mkdir -p build && cd build
+          
+          # Fetch V8
+          fetch v8
+          cd v8
+          
+          # Checkout specific version if specified
+          if [ -n "$V8_VERSION" ]; then
+            echo "Checking out version: $V8_VERSION"
+            git checkout "$V8_VERSION" || {
+              echo "Failed to checkout $V8_VERSION, trying as branch..."
+              git fetch origin "$V8_VERSION" && git checkout FETCH_HEAD
+            }
+          fi
+          
+          # Get commit info
+          V8_COMMIT=$(git log -1 --format='%H')
+          V8_COMMIT_SHORT=$(git log -1 --format='%h')
+          V8_COMMIT_MSG=$(git log -1 --format='%s')
+          V8_COMMIT_DATE=$(git log -1 --format='%cd' --date=format:'%Y%m%d')
+          
+          echo "V8 commit: $V8_COMMIT"
+          echo "V8 commit message: $V8_COMMIT_MSG"
+          
+          # Generate tag
+          if [ -n "$CUSTOM_TAG" ]; then
+            TAG="$CUSTOM_TAG"
+          else
+            TAG="d8-${BUILD_TYPE}-${V8_COMMIT_DATE}-${V8_COMMIT_SHORT}"
+          fi
+          
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          echo "V8_COMMIT=$V8_COMMIT" >> $GITHUB_OUTPUT
+          echo "V8_COMMIT_SHORT=$V8_COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "V8_COMMIT_MSG=$V8_COMMIT_MSG" >> $GITHUB_OUTPUT
+          echo "BUILD_TYPE=$BUILD_TYPE" >> $GITHUB_OUTPUT
+          
+          echo "Tag: $TAG"
       
       - name: Download and compile V8
         run: |
           set -e
           
-          BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
+          BUILD_TYPE="${{ steps.v8_info.outputs.BUILD_TYPE }}"
           V8_VERSION="${{ github.event.inputs.v8_version || '' }}"
           
           echo "Build type: $BUILD_TYPE"
@@ -117,12 +182,66 @@ jobs:
           
           echo "Build completed!"
           ls -lh "$BUILD_DIR/d8"
+          
+          # Copy d8 to root for release
+          cp "$BUILD_DIR/d8" ./d8
+          cp "$BUILD_DIR"/*.so ./ 2>/dev/null || true
       
-      - name: Upload artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v8_info.outputs.TAG }}
+          name: "V8 d8 ${{ steps.v8_info.outputs.BUILD_TYPE }} - ${{ steps.v8_info.outputs.V8_COMMIT_SHORT }}"
+          body: |
+            ## V8 d8 Build
+            
+            **Build Type:** ${{ steps.v8_info.outputs.BUILD_TYPE }}
+            **V8 Commit:** ${{ steps.v8_info.outputs.V8_COMMIT }}
+            **V8 Commit Message:** ${{ steps.v8_info.outputs.V8_COMMIT_MSG }}
+            **Build Date:** ${{ github.event.repository.updated_at }}
+            
+            ### Build Configuration
+            
+            ```gn
+            ${{ steps.v8_info.outputs.BUILD_TYPE == 'release' && 'is_debug = false
+            symbol_level = 2
+            v8_optimized_debug = false
+            v8_enable_backtrace = true' || 'is_debug = true
+            symbol_level = 2
+            v8_enable_sandbox = false
+            v8_enable_gdbjit = true' }}
+            ```
+            
+            ### Usage
+            
+            ```bash
+            # Download and make executable
+            chmod +x d8
+            
+            # Run with GDB
+            gdb ./d8
+            
+            # Run with V8 flags
+            ./d8 --allow-natives-syntax --shell test.js
+            ```
+            
+            ### Source
+            
+            V8 source: https://chromium.googlesource.com/v8/v8/+/${{ steps.v8_info.outputs.V8_COMMIT }}
+          files: |
+            build/v8/d8
+            build/v8/*.so
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Upload artifacts (backup)
         uses: actions/upload-artifact@v4
         with:
-          name: d8-${{ github.event.inputs.build_type || 'release' }}-${{ github.event.inputs.v8_version || 'latest' }}
+          name: d8-${{ steps.v8_info.outputs.TAG }}
           path: |
-            build/v8/out.gn/*/d8
-            build/v8/out.gn/*/*.so
+            build/v8/d8
+            build/v8/*.so
           retention-days: 90
