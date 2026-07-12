@@ -1,13 +1,21 @@
-name: Build d8 (Debug)
+name: Build d8 (Release with Symbols)
 
 on:
   workflow_dispatch:
     inputs:
       v8_version:
-        description: 'V8 version (e.g., 11.0.0). Leave empty for latest.'
+        description: 'V8 commit hash or version (e.g., 609a85c2a1bd77d6f6905369f4bc4fcf34c5db09). Leave empty for latest.'
         required: false
         default: ''
         type: string
+      build_type:
+        description: 'Build type: release (with symbols) or debug'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
 
 jobs:
   build:
@@ -23,20 +31,11 @@ jobs:
         run: |
           set -e
           
-          # Get latest version if not specified
-          if [ -z "${{ github.event.inputs.v8_version }}" ]; then
-            echo "Fetching latest V8 version..."
-            V8_VERSION=$(curl -s https://chromiumdash.appspot.com/fetch/milestones | jq -r '.[0].components[] | select(.name == "V8") | .versions[-1].branch_base' 2>/dev/null || echo "")
-            
-            if [ -z "$V8_VERSION" ]; then
-              V8_VERSION="13.0.0"
-              echo "Using default version: $V8_VERSION"
-            fi
-          else
-            V8_VERSION="${{ github.event.inputs.v8_version }}"
-          fi
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'release' }}"
+          V8_VERSION="${{ github.event.inputs.v8_version || '' }}"
           
-          echo "Building V8 version: $V8_VERSION"
+          echo "Build type: $BUILD_TYPE"
+          echo "V8 version: ${V8_VERSION:-latest}"
           
           # Clone depot_tools
           if [ ! -d "depot_tools" ]; then
@@ -53,35 +52,77 @@ jobs:
           
           # Checkout specific version if specified
           if [ -n "$V8_VERSION" ]; then
-            git checkout "$V8_VERSION" || true
+            echo "Checking out version: $V8_VERSION"
+            git checkout "$V8_VERSION" || {
+              echo "Failed to checkout $V8_VERSION, trying as branch..."
+              git fetch origin "$V8_VERSION" && git checkout FETCH_HEAD
+            }
           fi
           
-          # Install dependencies
-          ./tools/dev/v8gen.py x64.release
+          echo "Current V8 commit: $(git log -1 --format='%H %s')"
           
-          # Create debug build configuration
-          cat > args.gn << 'EOF'
-          is_debug = true
+          # Create build configuration based on build type
+          if [ "$BUILD_TYPE" = "release" ]; then
+            echo "Using Release + Symbols configuration"
+            cat > args.gn << 'EOF'
           is_component_build = false
+          is_debug = false
+          symbol_level = 2
+          blink_symbol_level = 2
+          v8_symbol_level = 2
+          perfetto_force_dcheck = "off"
+          dcheck_always_on = false
+          v8_enable_backtrace = true
+          v8_enable_fast_mksnapshot = true
+          v8_enable_slow_dchecks = false
+          v8_optimized_debug = false
+          v8_enable_disassembler = true
+          v8_enable_object_print = true
+          v8_enable_verify_heap = true
+          enable_cet_shadow_stack = false
+          v8_static_library = true
+          v8_use_external_startup_data = false
+          use_custom_libcxx = false
+          treat_warnings_as_errors = false
+          EOF
+            BUILD_DIR="out.gn/x64.release"
+          else
+            echo "Using Debug configuration"
+            cat > args.gn << 'EOF'
+          is_component_build = false
+          is_debug = true
           v8_static_library = true
           symbol_level = 2
           v8_enable_sandbox = false
           v8_optimized_debug = false
           v8_enable_gdbjit = true
+          v8_enable_backtrace = true
+          v8_enable_disassembler = true
+          v8_enable_object_print = true
+          v8_enable_verify_heap = true
           treat_warnings_as_errors = false
           v8_use_external_startup_data = false
           use_custom_libcxx = false
           EOF
+            BUILD_DIR="out.gn/x64.debug"
+          fi
           
-          # Build
-          gn gen out.gn/x64.debug
-          ninja -C out.gn/x64.debug d8
+          # Generate build files
+          echo "Generating build files..."
+          gn gen "$BUILD_DIR"
+          
+          # Build d8
+          echo "Building d8..."
+          ninja -C "$BUILD_DIR" d8
+          
+          echo "Build completed!"
+          ls -lh "$BUILD_DIR/d8"
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: d8-debug-${{ github.event.inputs.v8_version || 'latest' }}
+          name: d8-${{ github.event.inputs.build_type || 'release' }}-${{ github.event.inputs.v8_version || 'latest' }}
           path: |
-            build/v8/out.gn/x64.debug/d8
-            build/v8/out.gn/x64.debug/*.so
+            build/v8/out.gn/*/d8
+            build/v8/out.gn/*/*.so
           retention-days: 90
