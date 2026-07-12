@@ -5,30 +5,33 @@ Prebuilt d8 (V8's developer shell) for vulnerability research and CTF competitio
 ## Features
 
 - **Auto-release** - Builds automatically published to GitHub Releases
-- **Version tracking** - Each build gets a unique tag with V8 commit info
-- **Custom tags** - Use CVE IDs or custom names for releases
+- **V8 version tracking** - Each build tagged with V8 commit hash
 - **Release + Debug Symbols** - Optimized for vulnerability research (default)
 - **Debug builds** - Full debug symbols for development
 
 ## Version Tracking
 
-### Auto-generated Tags
-
-Format: `d8-{build_type}-{date}-{commit_short}`
+### Tag Format
+```
+v8-{commit_short}-{build_type}
+```
 
 Examples:
 ```
-d8-release-20250712-609a85c
-d8-debug-20250712-609a85c
+v8-609a85c-release
+v8-609a85c-debug
+v8-a1b2c3d-release
 ```
 
-### Custom Tags
-
-Use CVE IDs or custom names:
+### Release Name Format
 ```
-CVE-2025-5419
-CVE-2025-1234-release
-my-custom-build
+V8 {version} d8 ({build_type}) - {commit_short}
+```
+
+Examples:
+```
+V8 13.0.0 d8 (release) - 609a85c
+V8 d8 (debug) - a1b2c3d
 ```
 
 ## Quick Start
@@ -36,7 +39,7 @@ my-custom-build
 ### Download Prebuilt
 
 1. Go to [Releases](../../releases)
-2. Find the version you need (by CVE, date, or commit)
+2. Find the version you need (by commit hash, date, or V8 version)
 3. Download `d8` binary from the release assets
 
 ### Build Specific Version
@@ -47,7 +50,6 @@ my-custom-build
 4. Fill in parameters:
    - **Build type**: `release` or `debug`
    - **V8 version**: Git commit hash or version (optional)
-   - **Custom tag**: CVE ID or custom name (optional)
 5. Wait for build (~30 minutes)
 6. Release will be created automatically
 
@@ -79,14 +81,13 @@ Best for: Development, debugging V8 internals
 # Trigger build
 gh workflow run build-d8.yml \
   -f build_type=release \
-  -f v8_version=609a85c2a1bd77d6f6905369f4bc4fcf34c5db09 \
-  -f custom_tag=CVE-2025-5419
+  -f v8_version=609a85c2a1bd77d6f6905369f4bc4fcf34c5db09
 
 # Check status
 gh run list --workflow=build-d8.yml
 
 # Download from release
-gh release download CVE-2025-5419
+gh release download v8-609a85c-release
 ```
 
 ### Latest Debug Version
@@ -95,13 +96,12 @@ gh release download CVE-2025-5419
 gh workflow run build-d8.yml -f build_type=debug
 ```
 
-### Versioned Release
+### Specific V8 Version
 
 ```bash
 gh workflow run build-d8.yml \
   -f build_type=release \
-  -f v8_version=13.0.0 \
-  -f custom_tag=v8-13.0.0-release
+  -f v8_version=13.0.0
 ```
 
 ## Usage
@@ -126,8 +126,8 @@ Each release includes:
 - `d8` - Main binary
 - `*.so` - Shared libraries (if any)
 - Release notes with:
+  - V8 version and commit hash
   - Build type
-  - V8 commit hash and message
   - Build configuration
   - Usage instructions
 
@@ -140,12 +140,29 @@ gh release list
 
 ### Download specific release
 ```bash
-gh release download CVE-2025-5419
+# By tag
+gh release download v8-609a85c-release
+
+# Latest release
+gh release download
 ```
 
 ### Get release info
 ```bash
-gh release view CVE-2025-5419
+gh release view v8-609a85c-release
+```
+
+## Search Releases
+
+```bash
+# Search by V8 version
+gh release list | grep "V8 13.0.0"
+
+# Search by build type
+gh release list | grep "(release)"
+
+# Search by commit
+gh release list | grep "609a85c"
 ```
 
 ## Related Projects
