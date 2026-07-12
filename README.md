@@ -4,11 +4,52 @@ Prebuilt d8 (V8's developer shell) for vulnerability research and CTF competitio
 
 ## Features
 
+- **Auto-release** - Builds automatically published to GitHub Releases
+- **Version tracking** - Each build gets a unique tag with V8 commit info
+- **Custom tags** - Use CVE IDs or custom names for releases
 - **Release + Debug Symbols** - Optimized for vulnerability research (default)
 - **Debug builds** - Full debug symbols for development
-- **Manual trigger** - Build on-demand via GitHub Actions
-- **Configurable** - Choose specific V8 versions/commits or build latest
-- **Git commit support** - Build specific V8 commits for CVE reproduction
+
+## Version Tracking
+
+### Auto-generated Tags
+
+Format: `d8-{build_type}-{date}-{commit_short}`
+
+Examples:
+```
+d8-release-20250712-609a85c
+d8-debug-20250712-609a85c
+```
+
+### Custom Tags
+
+Use CVE IDs or custom names:
+```
+CVE-2025-5419
+CVE-2025-1234-release
+my-custom-build
+```
+
+## Quick Start
+
+### Download Prebuilt
+
+1. Go to [Releases](../../releases)
+2. Find the version you need (by CVE, date, or commit)
+3. Download `d8` binary from the release assets
+
+### Build Specific Version
+
+1. Go to [Actions](../../actions)
+2. Click "Build d8" workflow
+3. Click "Run workflow"
+4. Fill in parameters:
+   - **Build type**: `release` or `debug`
+   - **V8 version**: Git commit hash or version (optional)
+   - **Custom tag**: CVE ID or custom name (optional)
+5. Wait for build (~30 minutes)
+6. Release will be created automatically
 
 ## Build Types
 
@@ -18,8 +59,6 @@ is_debug = false
 symbol_level = 2
 v8_optimized_debug = false
 v8_enable_backtrace = true
-v8_enable_disassembler = true
-v8_enable_object_print = true
 ```
 Best for: Exploit development, CTF, vulnerability research
 
@@ -32,81 +71,81 @@ v8_enable_gdbjit = true
 ```
 Best for: Development, debugging V8 internals
 
-## Quick Start
+## Examples
 
-### Download Prebuilt
-
-1. Go to [Actions](../../actions)
-2. Click "Build d8 (Release with Symbols)" workflow
-3. Click "Run workflow"
-4. Select build type (release/debug)
-5. Enter V8 version or git commit hash (optional)
-6. Wait for build to complete (~30 minutes)
-7. Download artifacts from the workflow run
-
-### Build Specific CVE Version
-
-For reproducing CVEs, use the exact git commit hash:
-
-```
-# Example: CVE-2025-5419
-V8 commit: 609a85c2a1bd77d6f6905369f4bc4fcf34c5db09
-```
-
-### Build Locally
+### CVE-2025-5419
 
 ```bash
-# Clone this repository
-git clone https://github.com/Fz0x00/v8-d8-builder.git
-cd v8-d8-builder
+# Trigger build
+gh workflow run build-d8.yml \
+  -f build_type=release \
+  -f v8_version=609a85c2a1bd77d6f6905369f4bc4fcf34c5db09 \
+  -f custom_tag=CVE-2025-5419
 
-# Build using Docker
-docker run --rm -v $(pwd)/output:/output var77/v8-docker-build bash -c \
-  "fetch v8 && cd v8 && \
-   cat > args.gn << EOF
-  is_component_build = false
-  is_debug = false
-  symbol_level = 2
-  v8_optimized_debug = false
-  v8_enable_backtrace = true
-  v8_enable_disassembler = true
-  v8_enable_object_print = true
-  v8_enable_verify_heap = true
-  v8_static_library = true
-  v8_use_external_startup_data = false
-  use_custom_libcxx = false
-  treat_warnings_as_errors = false
-  EOF
-  gn gen out.gn/x64.release && \
-  ninja -C out.gn/x64.release d8 && \
-  cp out.gn/x64.release/d8 /output/"
+# Check status
+gh run list --workflow=build-d8.yml
+
+# Download from release
+gh release download CVE-2025-5419
 ```
 
-## Usage with GDB
+### Latest Debug Version
 
 ```bash
-# Run d8 with GDB
+gh workflow run build-d8.yml -f build_type=debug
+```
+
+### Versioned Release
+
+```bash
+gh workflow run build-d8.yml \
+  -f build_type=release \
+  -f v8_version=13.0.0 \
+  -f custom_tag=v8-13.0.0-release
+```
+
+## Usage
+
+```bash
+# Make executable
+chmod +x d8
+
+# Run with GDB
 gdb ./d8
 
-# Inside GDB
-(gdb) run --allow-natives-syntax --shell test.js
-
-# Set breakpoints
-(gdb) break v8::internal::Heap::AllocateRaw
-(gdb) continue
-```
-
-## Debugging Tips
-
-```bash
-# Run with V8 flags for debugging
+# Run with V8 flags
 ./d8 --allow-natives-syntax --shell test.js
 
 # Enable V8 logging
 ./d8 --trace-opt --trace-deopt test.js
+```
 
-# Use with GDB
-gdb --args ./d8 --allow-natives-syntax test.js
+## Release Structure
+
+Each release includes:
+- `d8` - Main binary
+- `*.so` - Shared libraries (if any)
+- Release notes with:
+  - Build type
+  - V8 commit hash and message
+  - Build configuration
+  - Usage instructions
+
+## API Access
+
+### List all releases
+```bash
+gh release list
+```
+
+### Download specific release
+```bash
+gh release download CVE-2025-5419
+```
+
+### Get release info
+```bash
+gh release view CVE-2025-5419
 ```
 
 ## Related Projects
