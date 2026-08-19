@@ -20,7 +20,7 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       
@@ -161,7 +161,7 @@ jobs:
           cp out.gn/x64.debug/*.so ./ 2>/dev/null || true
       
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.v8_info.outputs.TAG }}
           name: ${{ steps.v8_info.outputs.RELEASE_NAME }}
@@ -211,7 +211,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Upload artifacts (backup)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: d8-${{ steps.v8_info.outputs.TAG }}
           path: |
