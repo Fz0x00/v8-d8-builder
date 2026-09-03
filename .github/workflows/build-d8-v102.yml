@@ -64,6 +64,14 @@ jobs:
           cp out.gn/x64.release/d8 ./d8
           chmod +x d8
           tar czf d8-v8-10.2.154.26-linux-x64.tar.gz d8
+          ls -lh d8-v8-10.2.154.26-linux-x64.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d8-v8-10.2.154.26
+          path: build/v8/d8-v8-10.2.154.26-linux-x64.tar.gz
+          retention-days: 30
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
@@ -89,9 +97,10 @@ jobs:
             chmod +x d8
             ./d8 --allow-natives-syntax --expose-gc test.js
             ```
-          files: d8-v8-10.2.154.26-linux-x64.tar.gz
+          files: build/v8/d8-v8-10.2.154.26-linux-x64.tar.gz
           draft: false
           prerelease: false
           make_latest: true
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
