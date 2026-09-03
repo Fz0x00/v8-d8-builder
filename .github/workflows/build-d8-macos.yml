@@ -35,6 +35,8 @@ jobs:
         run: |
           cd build/v8
           python3 << 'PYEOF'
+          import re
+
           # 1. BUILD.gn: remove Werror + clang plugins
           with open('build/config/compiler/BUILD.gn') as f:
               gn = f.read()
@@ -44,41 +46,36 @@ jobs:
                   'check-stack-allocated','raw-ptr-template','use-classify-type']))
           with open('build/config/compiler/BUILD.gn', 'w') as f:
               f.write(gn)
-          print("BUILD.gn patched")
 
           # 2. instruction-codes.h: comment out static_asserts
           with open('src/compiler/backend/instruction-codes.h') as f:
               ic = f.read()
-          import re
           ic = re.sub(r'^(static_assert\(ArchOpcodeField)', r'//\1', ic, flags=re.M)
           ic = re.sub(r'^(\s+AddressingModeField::is_valid)', r'//\1', ic, flags=re.M)
           ic = re.sub(r'^(\s+"All addressing modes)', r'//\1', ic, flags=re.M)
           with open('src/compiler/backend/instruction-codes.h', 'w') as f:
               f.write(ic)
-          print("instruction-codes.h patched")
 
           # 3. zutil.h: THE KEY FIX
-          # The macOS TARGET_OS_MAC block defines fdopen to NULL
-          # which breaks Xcode 26's _stdio.h function declaration
           with open('third_party/zlib/zutil.h') as f:
-              zh = f.read()
-          # Replace ALL #define fdopen lines with comments
-          zh = re.sub(r'^(\s*#\s*define\s+fdopen\s*\(.*?\)\s*\S+.*)$', 
-                      r'/* patched: \1 */', zh, flags=re.M)
-          # Also remove stdio.h include in ZLIB_DEBUG section
-          zh = zh.replace('#  include <stdio.h>', '#  include <stdio.h> /* removed by patch */')
+              lines = f.readlines()
+          new_lines = []
+          for line in lines:
+              stripped = line.strip()
+              # Comment out any #define fdopen line
+              if re.match(r'^#\s*define\s+fdopen\s*\(', stripped):
+                  new_lines.append('// ' + line)
+              else:
+                  new_lines.append(line)
           with open('third_party/zlib/zutil.h', 'w') as f:
-              f.write(zh)
-          print("zutil.h patched")
+              f.writelines(new_lines)
+          print("All patches applied")
 
           # Verify
           import subprocess
           r = subprocess.run(['grep', '-c', 'define fdopen', 'third_party/zlib/zutil.h'],
                              capture_output=True, text=True)
-          print(f"fdopen defines remaining: {r.stdout.strip()}")
-          r = subprocess.run(['grep', '-c', 'find-bad-constructs', 'build/config/compiler/BUILD.gn'],
-                             capture_output=True, text=True)
-          print(f"clang plugin refs remaining: {r.stdout.strip()}")
+          print(f"fdopen defines: {r.stdout.strip()}")
           PYEOF
 
       - name: Configure and Build
