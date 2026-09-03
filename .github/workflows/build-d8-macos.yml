@@ -1,0 +1,78 @@
+name: Build d8 V8-10.2.154.26 (macOS)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Install dependencies
+        run: |
+          brew install python3 git curl pkg-config
+
+      - name: Fetch depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$PWD/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch V8
+        run: |
+          mkdir -p build && cd build
+          fetch v8
+          cd v8
+          git checkout 10.2.154.26
+          gclient sync
+
+      - name: Configure and Build
+        run: |
+          cd build/v8
+          cat > args.gn << 'EOF'
+          is_debug = false
+          is_component_build = false
+          v8_static_library = true
+          v8_use_external_startup_data = false
+          v8_enable_sandbox = false
+          v8_optimized_debug = false
+          v8_enable_gdbjit = false
+          v8_enable_backtrace = true
+          v8_enable_disassembler = true
+          v8_enable_object_print = true
+          v8_enable_verify_heap = false
+          treat_warnings_as_errors = false
+          use_custom_libcxx = false
+          target_cpu = "arm64"
+          EOF
+          
+          gn gen out.gn/arm64.release
+          ninja -C out.gn/arm64.release d8
+
+      - name: Package
+        run: |
+          cd build/v8
+          cp out.gn/arm64.release/d8 ./d8
+          chmod +x d8
+          tar czf d8-v8-10.2.154.26-mac-arm64.tar.gz d8
+          ls -lh d8-v8-10.2.154.26-mac-arm64.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d8-mac-arm64
+          path: build/v8/d8-v8-10.2.154.26-mac-arm64.tar.gz
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v8-10.2.154.26-debug-mac
+          name: "V8 10.2.154.26 d8 (macOS arm64)"
+          body: |
+            Target: Qaxbrowser (Chromium 102 / V8 10.2.154.26)
+          files: build/v8/d8-v8-10.2.154.26-mac-arm64.tar.gz
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
