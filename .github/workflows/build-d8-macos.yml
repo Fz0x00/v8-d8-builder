@@ -56,26 +56,28 @@ jobs:
           with open('src/compiler/backend/instruction-codes.h', 'w') as f:
               f.write(ic)
 
-          # 3. zutil.h: THE KEY FIX
+          # 3. bit-field.h: fix constexpr kMax (Clang 21 + C++20 issue)
+          with open('src/base/bit-field.h') as f:
+              bf = f.read()
+          bf = bf.replace(
+              'static constexpr T kMax = static_cast<T>(kNumValues - 1);',
+              'static constexpr T kMax = static_cast<T>(static_cast<U>(kNumValues - 1));')
+          with open('src/base/bit-field.h', 'w') as f:
+              f.write(bf)
+
+          # 4. zutil.h: comment out ALL #define fdopen lines
           with open('third_party/zlib/zutil.h') as f:
               lines = f.readlines()
           new_lines = []
           for line in lines:
               stripped = line.strip()
-              # Comment out any #define fdopen line
               if re.match(r'^#\s*define\s+fdopen\s*\(', stripped):
                   new_lines.append('// ' + line)
               else:
                   new_lines.append(line)
           with open('third_party/zlib/zutil.h', 'w') as f:
               f.writelines(new_lines)
-          print("All patches applied")
-
-          # Verify
-          import subprocess
-          r = subprocess.run(['grep', '-c', 'define fdopen', 'third_party/zlib/zutil.h'],
-                             capture_output=True, text=True)
-          print(f"fdopen defines: {r.stdout.strip()}")
+          print("All patches applied successfully")
           PYEOF
 
       - name: Configure and Build
