@@ -19,7 +19,6 @@ jobs:
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "$PWD/depot_tools" >> $GITHUB_PATH
-          # Bootstrap depot_tools
           cd depot_tools
           ./ensure_bootstrap
 
@@ -33,19 +32,27 @@ jobs:
           git checkout 10.2.154.26
           gclient sync --nohooks --no-history
 
-      - name: Patch source for Clang 21 compatibility
+      - name: Patch source for Clang 21 + Xcode 26 compatibility
         run: |
           cd build/v8
           
-          # Force C++17
+          # 1. Force C++17
           sed -i '' 's/cflags_cc += \[ "-std=${standard_prefix}++20" \]/cflags_cc += [ "-std=${standard_prefix}++17" ]/' build/config/compiler/BUILD.gn
           
-          # Comment out failing static_asserts
+          # 2. Remove -Werror to let warnings through
+          sed -i '' 's/"-Werror"/"-Wno-error"/g' build/config/compiler/BUILD.gn
+          sed -i '' 's/"-Werror",/"-Wno-error",/g' build/config/compiler/BUILD.gn
+          
+          # 3. Remove clang plugin args that don't exist in bundled clang 15
+          sed -i '' '/find-bad-constructs/d' build/config/compiler/BUILD.gn
+          sed -i '' '/plugin-arg-find-bad-constructs/d' build/config/compiler/BUILD.gn
+          
+          # 4. Comment out failing static_asserts
           sed -i '' '/^static_assert(ArchOpcodeField/s/^/\/\//' src/compiler/backend/instruction-codes.h
           sed -i '' '/AddressingModeField::is_valid/s/^/\/\//' src/compiler/backend/instruction-codes.h
           sed -i '' '/"All addressing modes/s/^/\/\//' src/compiler/backend/instruction-codes.h
           
-          # Fix zlib macOS redefinition
+          # 5. Fix zlib macOS redefinition
           sed -i '' '/#ifdef __APPLE__/,/#endif/{
             /#ifdef __APPLE__/!{
               /#  define OS_CODE 19/{
@@ -79,6 +86,7 @@ jobs:
           target_cpu = "arm64"
           is_clang = true
           use_lld = false
+          clang_use_chrome_plugins = false
           EOF
           
           gn gen out.gn/arm64.release
