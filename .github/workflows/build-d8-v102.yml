@@ -1,0 +1,97 @@
+name: Build d8 V8-10.2.154.26
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v8-10.2*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 git curl build-essential pkg-config libglib2.0-dev
+
+      - name: Fetch depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$PWD/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch V8
+        run: |
+          mkdir -p build && cd build
+          fetch v8
+          cd v8
+          git checkout 10.2.154.26
+          gclient sync
+          echo "V8 version: $(git log -1 --format='%H %s')"
+
+      - name: Configure and Build
+        run: |
+          cd build/v8
+          cat > args.gn << 'EOF'
+          is_debug = false
+          is_component_build = false
+          v8_static_library = true
+          v8_use_external_startup_data = false
+          v8_enable_sandbox = false
+          v8_optimized_debug = false
+          v8_enable_gdbjit = false
+          v8_enable_backtrace = true
+          v8_enable_disassembler = true
+          v8_enable_object_print = true
+          v8_enable_verify_heap = false
+          treat_warnings_as_errors = false
+          use_custom_libcxx = false
+          target_cpu = "x64"
+          EOF
+          
+          gn gen out.gn/x64.release
+          ninja -C out.gn/x64.release d8
+          
+          ls -lh out.gn/x64.release/d8
+
+      - name: Package
+        run: |
+          cd build/v8
+          cp out.gn/x64.release/d8 ./d8
+          chmod +x d8
+          tar czf d8-v8-10.2.154.26-linux-x64.tar.gz d8
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: v8-10.2.154.26-debug
+          name: "V8 10.2.154.26 d8 (debug) — Chromium 102"
+          body: |
+            ## V8 10.2.154.26 d8
+            
+            Target: Qaxbrowser (Chromium 102.0.5005.200 / V8 10.2.154.26)
+            
+            ### Build Config
+            ```gn
+            is_debug = false
+            v8_enable_sandbox = false
+            v8_enable_backtrace = true
+            v8_enable_disassembler = true
+            v8_enable_object_print = true
+            ```
+            
+            ### Usage
+            ```bash
+            chmod +x d8
+            ./d8 --allow-natives-syntax --expose-gc test.js
+            ```
+          files: d8-v8-10.2.154.26-linux-x64.tar.gz
+          draft: false
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
