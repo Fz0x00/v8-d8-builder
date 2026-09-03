@@ -14,7 +14,11 @@ jobs:
       - name: Install dependencies
         run: |
           brew install python3 git curl pkg-config
-          pip3 install --break-system-packages setuptools
+          # Force install setuptools to system Python
+          python3 -m pip install --break-system-packages --user setuptools 2>/dev/null || \
+          python3 -c "import setuptools; print('setuptools already available')" 2>/dev/null || \
+          (curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --break-system-packages && \
+           python3 -m pip install --break-system-packages setuptools)
 
       - name: Fetch depot_tools
         run: |
@@ -22,12 +26,18 @@ jobs:
           echo "$PWD/depot_tools" >> $GITHUB_PATH
 
       - name: Fetch V8
+        env:
+          DEPOT_TOOLS_UPDATE: "0"
         run: |
           mkdir -p build && cd build
           fetch v8
           cd v8
           git checkout 10.2.154.26
-          gclient sync
+          # Skip hooks first, then run them after patching
+          gclient sync --nohooks
+          # Now patch before running hooks
+          sed -i '' 's/import pkg_resources/try:\n    import pkg_resources\nexcept ImportError:\n    pass/' build/mac_toolchain.py 2>/dev/null || true
+          gclient runhooks
 
       - name: Patch source for Clang 21 compatibility
         run: |
