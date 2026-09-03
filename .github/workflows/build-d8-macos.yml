@@ -34,34 +34,52 @@ jobs:
       - name: Patch source
         run: |
           cd build/v8
-          
-          # 1. Remove Werror and clang plugins from BUILD.gn
-          sed -i '' '/add-plugin/d' build/config/compiler/BUILD.gn
-          sed -i '' '/plugin-arg-find-bad-constructs/d' build/config/compiler/BUILD.gn
-          sed -i '' '/check-stack-allocated/d' build/config/compiler/BUILD.gn
-          sed -i '' '/raw-ptr-template-as-trivial-member/d' build/config/compiler/BUILD.gn
-          sed -i '' '/use-classify-type/d' build/config/compiler/BUILD.gn
-          sed -i '' 's/"-Werror"/"-Wno-error"/g' build/config/compiler/BUILD.gn
-          
-          # 2. Comment out static_asserts in instruction-codes.h
-          sed -i '' 's/^static_assert(ArchOpcodeField/\/\/static_assert(ArchOpcodeField/' src/compiler/backend/instruction-codes.h
-          sed -i '' 's/^    AddressingModeField::is_valid/\/\/    AddressingModeField::is_valid/' src/compiler/backend/instruction-codes.h
-          sed -i '' 's/^    "All addressing modes/\/\/    "All addressing modes/' src/compiler/backend/instruction-codes.h
-          
-          # 3. Nuclear fix for zlib: replace entire zutil.h macOS section
-          # The root cause: Xcode 26 _stdio.h has a token that conflicts with zlib macros
-          # Fix: guard ALL stdio includes and force disable ZLIB_DEBUG
-          sed -i '' 's|^#  include <stdio.h>$|// patched: removed stdio include|' third_party/zlib/zutil.h
-          # Also remove fdopen macros
-          sed -i '' 's|^#  define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched|' third_party/zlib/zutil.h
-          sed -i '' 's|^#    define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched|' third_party/zlib/zutil.h
-          sed -i '' 's|^#    define fdopen(fd,type)  _fdopen(fd,type)|// patched|' third_party/zlib/zutil.h
-          
+          python3 << 'PYEOF'
+          # 1. BUILD.gn: remove Werror + clang plugins
+          with open('build/config/compiler/BUILD.gn') as f:
+              gn = f.read()
+          gn = gn.replace('"-Werror"', '"-Wno-error"')
+          gn = '\n'.join(l for l in gn.split('\n') 
+              if not any(x in l for x in ['add-plugin','plugin-arg-find-bad',
+                  'check-stack-allocated','raw-ptr-template','use-classify-type']))
+          with open('build/config/compiler/BUILD.gn', 'w') as f:
+              f.write(gn)
+          print("BUILD.gn patched")
+
+          # 2. instruction-codes.h: comment out static_asserts
+          with open('src/compiler/backend/instruction-codes.h') as f:
+              ic = f.read()
+          import re
+          ic = re.sub(r'^(static_assert\(ArchOpcodeField)', r'//\1', ic, flags=re.M)
+          ic = re.sub(r'^(\s+AddressingModeField::is_valid)', r'//\1', ic, flags=re.M)
+          ic = re.sub(r'^(\s+"All addressing modes)', r'//\1', ic, flags=re.M)
+          with open('src/compiler/backend/instruction-codes.h', 'w') as f:
+              f.write(ic)
+          print("instruction-codes.h patched")
+
+          # 3. zutil.h: THE KEY FIX
+          # The macOS TARGET_OS_MAC block defines fdopen to NULL
+          # which breaks Xcode 26's _stdio.h function declaration
+          with open('third_party/zlib/zutil.h') as f:
+              zh = f.read()
+          # Replace ALL #define fdopen lines with comments
+          zh = re.sub(r'^(\s*#\s*define\s+fdopen\s*\(.*?\)\s*\S+.*)$', 
+                      r'/* patched: \1 */', zh, flags=re.M)
+          # Also remove stdio.h include in ZLIB_DEBUG section
+          zh = zh.replace('#  include <stdio.h>', '#  include <stdio.h> /* removed by patch */')
+          with open('third_party/zlib/zutil.h', 'w') as f:
+              f.write(zh)
+          print("zutil.h patched")
+
           # Verify
-          echo "stdio includes remaining:"
-          grep -c "include.*stdio" third_party/zlib/zutil.h || echo "0"
-          echo "fdopen remaining:"
-          grep -c "define fdopen" third_party/zlib/zutil.h || echo "0"
+          import subprocess
+          r = subprocess.run(['grep', '-c', 'define fdopen', 'third_party/zlib/zutil.h'],
+                             capture_output=True, text=True)
+          print(f"fdopen defines remaining: {r.stdout.strip()}")
+          r = subprocess.run(['grep', '-c', 'find-bad-constructs', 'build/config/compiler/BUILD.gn'],
+                             capture_output=True, text=True)
+          print(f"clang plugin refs remaining: {r.stdout.strip()}")
+          PYEOF
 
       - name: Configure and Build
         run: |
