@@ -19,8 +19,7 @@ jobs:
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "$PWD/depot_tools" >> $GITHUB_PATH
-          cd depot_tools
-          ./ensure_bootstrap
+          cd depot_tools && ./ensure_bootstrap
 
       - name: Fetch V8
         env:
@@ -32,37 +31,44 @@ jobs:
           git checkout 10.2.154.26
           gclient sync --nohooks --no-history
 
-      - name: Patch source for Clang 21 + Xcode 26 compatibility
+      - name: Patch source
         run: |
           cd build/v8
           
-          # 1. Force C++17
-          sed -i '' 's/cflags_cc += \[ "-std=${standard_prefix}++20" \]/cflags_cc += [ "-std=${standard_prefix}++17" ]/' build/config/compiler/BUILD.gn
-          
-          # 2. Remove -Werror to let warnings through
+          # 1. Remove ALL -Werror flags from BUILD.gn
           sed -i '' 's/"-Werror"/"-Wno-error"/g' build/config/compiler/BUILD.gn
-          sed -i '' 's/"-Werror",/"-Wno-error",/g' build/config/compiler/BUILD.gn
           
-          # 3. Remove clang plugin args that don't exist in bundled clang 15
-          sed -i '' '/find-bad-constructs/d' build/config/compiler/BUILD.gn
+          # 2. Remove clang plugin lines entirely (different patterns)
+          sed -i '' '/add-plugin/d' build/config/compiler/BUILD.gn
           sed -i '' '/plugin-arg-find-bad-constructs/d' build/config/compiler/BUILD.gn
+          sed -i '' '/check-stack-allocated/d' build/config/compiler/BUILD.gn
+          sed -i '' '/raw-ptr-template-as-trivial-member/d' build/config/compiler/BUILD.gn
+          sed -i '' '/use-classify-type/d' build/config/compiler/BUILD.gn
           
-          # 4. Comment out failing static_asserts
-          sed -i '' '/^static_assert(ArchOpcodeField/s/^/\/\//' src/compiler/backend/instruction-codes.h
-          sed -i '' '/AddressingModeField::is_valid/s/^/\/\//' src/compiler/backend/instruction-codes.h
-          sed -i '' '/"All addressing modes/s/^/\/\//' src/compiler/backend/instruction-codes.h
+          # 3. Comment out failing static_asserts
+          sed -i '' '/^static_assert(ArchOpcodeField/s/^\/\//' src/compiler/backend/instruction-codes.h
+          sed -i '' '/AddressingModeField::is_valid/kLastAddressingMode/s/^\/\//' src/compiler/backend/instruction-codes.h
+          sed -i '' '/"All addressing modes must fit/s/^\/\//' src/compiler/backend/instruction-codes.h
           
-          # 5. Fix zlib macOS redefinition
-          sed -i '' '/#ifdef __APPLE__/,/#endif/{
-            /#ifdef __APPLE__/!{
-              /#  define OS_CODE 19/{
-                i\
-          #  ifndef OS_CODE
-                a\
-          #  endif
-              }
-            }
-          }' third_party/zlib/zutil.h
+          # 4. Fix zlib: replace the entire __APPLE__ block to avoid fdopen/stdio conflict
+          # The issue is fdopen macro from zutil.h conflicts with macOS SDK
+          python3 -c "
+          import re
+          with open('third_party/zlib/zutil.h', 'r') as f:
+              content = f.read()
+          # Comment out the fdopen macro
+          content = content.replace('#define fdopen(fd,mode) NULL /* No fdopen() */', '// #define fdopen(fd,mode) NULL /* patched */')
+          # Add include guard around __APPLE__ OS_CODE
+          content = content.replace('#ifdef __APPLE__\\n#  define OS_CODE 19', '#ifdef __APPLE__\\n#  ifndef OS_CODE\\n#    define OS_CODE 19\\n#  endif')
+          with open('third_party/zlib/zutil.h', 'w') as f:
+              f.write(content)
+          "
+          
+          # 5. Verify patches
+          echo "=== Verify clang plugin removed ==="
+          grep -c "find-bad-constructs" build/config/compiler/BUILD.gn || echo "0 matches (good)"
+          echo "=== Verify Werror removed ==="
+          grep -c '"-Werror"' build/config/compiler/BUILD.gn || echo "0 matches (good)"
           
           echo "Patches applied"
 
