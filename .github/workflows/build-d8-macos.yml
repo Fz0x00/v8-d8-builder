@@ -19,6 +19,9 @@ jobs:
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "$PWD/depot_tools" >> $GITHUB_PATH
+          # Bootstrap depot_tools
+          cd depot_tools
+          ./ensure_bootstrap
 
       - name: Fetch V8
         env:
@@ -28,7 +31,6 @@ jobs:
           fetch v8
           cd v8
           git checkout 10.2.154.26
-          # Skip ALL hooks - they need vpython which fails on macOS runners
           gclient sync --nohooks --no-history
 
       - name: Patch source for Clang 21 compatibility
@@ -54,10 +56,6 @@ jobs:
               }
             }
           }' third_party/zlib/zutil.h
-          
-          # Generate ICU data and inspector protocol manually
-          # These are normally done by hooks
-          python3 tools/dev/gm.py --regenerate 2>/dev/null || true
           
           echo "Patches applied"
 
