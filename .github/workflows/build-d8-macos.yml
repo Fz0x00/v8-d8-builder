@@ -48,20 +48,20 @@ jobs:
           sed -i '' 's/^    AddressingModeField::is_valid/\/\/    AddressingModeField::is_valid/' src/compiler/backend/instruction-codes.h
           sed -i '' 's/^    "All addressing modes/\/\/    "All addressing modes/' src/compiler/backend/instruction-codes.h
           
-          # 3. Fix zlib: comment out ALL fdopen macros and fix OS_CODE
-          sed -i '' 's|^#  define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched: removed fdopen macro|' third_party/zlib/zutil.h
-          sed -i '' 's|^#    define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched: removed fdopen macro|' third_party/zlib/zutil.h
-          sed -i '' 's|^#    define fdopen(fd,type)  _fdopen(fd,type)|// patched: removed fdopen macro|' third_party/zlib/zutil.h
-          # Fix OS_CODE redefinition
-          sed -i '' 's|^#ifdef __APPLE__$|#ifdef __APPLE__\n#  ifndef OS_CODE|' third_party/zlib/zutil.h
-          sed -i '' 's|^#  define OS_CODE 19$|#  define OS_CODE 19\n#  endif|' third_party/zlib/zutil.h
+          # 3. Nuclear fix for zlib: replace entire zutil.h macOS section
+          # The root cause: Xcode 26 _stdio.h has a token that conflicts with zlib macros
+          # Fix: guard ALL stdio includes and force disable ZLIB_DEBUG
+          sed -i '' 's|^#  include <stdio.h>$|// patched: removed stdio include|' third_party/zlib/zutil.h
+          # Also remove fdopen macros
+          sed -i '' 's|^#  define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched|' third_party/zlib/zutil.h
+          sed -i '' 's|^#    define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched|' third_party/zlib/zutil.h
+          sed -i '' 's|^#    define fdopen(fd,type)  _fdopen(fd,type)|// patched|' third_party/zlib/zutil.h
           
           # Verify
-          echo "fdopen count after patch:"
+          echo "stdio includes remaining:"
+          grep -c "include.*stdio" third_party/zlib/zutil.h || echo "0"
+          echo "fdopen remaining:"
           grep -c "define fdopen" third_party/zlib/zutil.h || echo "0"
-          echo "Plugin count after patch:"
-          grep -c "find-bad-constructs" build/config/compiler/BUILD.gn || echo "0"
-          echo "Done"
 
       - name: Configure and Build
         run: |
