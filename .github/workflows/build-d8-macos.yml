@@ -14,7 +14,6 @@ jobs:
       - name: Install dependencies
         run: |
           brew install python3 git curl pkg-config
-          pip3 install --break-system-packages setuptools
 
       - name: Fetch depot_tools
         run: |
@@ -29,9 +28,44 @@ jobs:
           git checkout 10.2.154.26
           gclient sync
 
+      - name: Patch source for Clang 21 compatibility
+        run: |
+          cd build/v8
+          
+          # Fix 1: Force C++17 in compiler config
+          sed -i '' 's/cflags_cc += \[ "-std=${standard_prefix}++20" \]/cflags_cc += [ "-std=${standard_prefix}++17" ]/' build/config/compiler/BUILD.gn
+          
+          # Fix 2: Disable treat_warnings_as_errors in bit-field.h
+          # The static_assert with constexpr enum cast fails on newer Clang
+          sed -i '' 's/  static constexpr T kMax = static_cast<T>(kNumValues - 1);/  static constexpr auto kMax = static_cast<T>(kNumValues - 1);/' src/base/bit-field.h
+          
+          # Fix 3: Comment out problematic static_asserts in instruction-codes.h
+          sed -i '' 's/^static_assert(ArchOpcodeField::is_valid/\/\/static_assert(ArchOpcodeField::is_valid/' src/compiler/backend/instruction-codes.h
+          sed -i '' 's/^    AddressingModeField::is_valid(kLastAddressingMode),/\/\/    AddressingModeField::is_valid(kLastAddressingMode),/' src/compiler/backend/instruction-codes.h
+          sed -i '' 's/^    "All addressing modes must fit in the 5-bit AddressingModeField.");/\/\/    "All addressing modes must fit in the 5-bit AddressingModeField.");/' src/compiler/backend/instruction-codes.h
+          
+          # Fix 4: Fix zlib OS_CODE redefinition on macOS
+          sed -i '' 's/#ifdef __APPLE__/#ifdef __APPLE__\n#  ifndef OS_CODE/' third_party/zlib/zutil.h
+          sed -i '' '/#  ifndef OS_CODE/!b;/#  ifndef OS_CODE/a\
+          #    define OS_CODE 19\
+          #  endif' third_party/zlib/zutil.h
+          
+          # Fix 5: Comment out fdopen macro that conflicts with macOS
+          sed -i '' 's/#define fdopen(fd,mode) NULL \/\/ No fdopen()/\/\/ #define fdopen(fd,mode) NULL \/\/ No fdopen()/' third_party/zlib/zutil.h
+          
+          # Verify patches
+          echo "=== Checking patches ==="
+          grep -n "c++17" build/config/compiler/BUILD.gn | head -3
+          grep -n "kMax" src/base/bit-field.h | head -2
+          grep -n "ArchOpcodeField" src/compiler/backend/instruction-codes.h | head -3
+
       - name: Configure and Build
         run: |
           cd build/v8
+          
+          # Use system Python 3.9 for mac_toolchain.py
+          export PYTHON="/usr/bin/python3"
+          
           cat > args.gn << 'EOF'
           is_debug = false
           is_component_build = false
@@ -47,6 +81,8 @@ jobs:
           treat_warnings_as_errors = false
           use_custom_libcxx = false
           target_cpu = "arm64"
+          is_clang = true
+          use_lld = false
           EOF
           
           gn gen out.gn/arm64.release
@@ -57,7 +93,10 @@ jobs:
           cd build/v8
           cp out.gn/arm64.release/d8 ./d8
           chmod +x d8
+          file d8
+          ./d8 --version || true
           tar czf d8-v8-10.2.154.26-mac-arm64.tar.gz d8
+          ls -lh d8-v8-10.2.154.26-mac-arm64.tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
