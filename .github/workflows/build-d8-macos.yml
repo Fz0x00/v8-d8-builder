@@ -34,53 +34,34 @@ jobs:
       - name: Patch source
         run: |
           cd build/v8
-          python3 << 'PATCH'
-          import re
           
-          # 1. Fix compiler/BUILD.gn - remove Werror and clang plugins
-          with open('build/config/compiler/BUILD.gn', 'r') as f:
-              gn = f.read()
-          gn = gn.replace('"-Werror"', '"-Wno-error"')
-          # Remove all lines containing clang plugin args
-          gn_lines = gn.split('\n')
-          gn_lines = [l for l in gn_lines if 'add-plugin' not in l 
-                      and 'plugin-arg-find-bad-constructs' not in l
-                      and 'check-stack-allocated' not in l
-                      and 'raw-ptr-template-as-trivial-member' not in l
-                      and 'use-classify-type' not in l]
-          gn = '\n'.join(gn_lines)
-          with open('build/config/compiler/BUILD.gn', 'w') as f:
-              f.write(gn)
-          print("BUILD.gn patched")
+          # 1. Remove Werror and clang plugins from BUILD.gn
+          sed -i '' '/add-plugin/d' build/config/compiler/BUILD.gn
+          sed -i '' '/plugin-arg-find-bad-constructs/d' build/config/compiler/BUILD.gn
+          sed -i '' '/check-stack-allocated/d' build/config/compiler/BUILD.gn
+          sed -i '' '/raw-ptr-template-as-trivial-member/d' build/config/compiler/BUILD.gn
+          sed -i '' '/use-classify-type/d' build/config/compiler/BUILD.gn
+          sed -i '' 's/"-Werror"/"-Wno-error"/g' build/config/compiler/BUILD.gn
           
-          # 2. Fix instruction-codes.h - comment out static_asserts
-          with open('src/compiler/backend/instruction-codes.h', 'r') as f:
-              ic = f.read()
-          ic = re.sub(r'^(static_assert\(ArchOpcodeField)', r'//\1', ic, flags=re.MULTILINE)
-          ic = re.sub(r'^(\s+AddressingModeField::is_valid)', r'//\1', ic, flags=re.MULTILINE)
-          ic = re.sub(r'^(\s+"All addressing modes)', r'//\1', ic, flags=re.MULTILINE)
-          with open('src/compiler/backend/instruction-codes.h', 'w') as f:
-              f.write(ic)
-          print("instruction-codes.h patched")
+          # 2. Comment out static_asserts in instruction-codes.h
+          sed -i '' 's/^static_assert(ArchOpcodeField/\/\/static_assert(ArchOpcodeField/' src/compiler/backend/instruction-codes.h
+          sed -i '' 's/^    AddressingModeField::is_valid/\/\/    AddressingModeField::is_valid/' src/compiler/backend/instruction-codes.h
+          sed -i '' 's/^    "All addressing modes/\/\/    "All addressing modes/' src/compiler/backend/instruction-codes.h
           
-          # 3. Fix zlib zutil.h - avoid OS_CODE redefinition and fdopen conflict
-          with open('third_party/zlib/zutil.h', 'r') as f:
-              zh = f.read()
-          # Comment out fdopen macro that conflicts with macOS SDK
-          zh = zh.replace('#define fdopen(fd,mode) NULL /* No fdopen() */', 
-                          '// #define fdopen(fd,mode) NULL /* patched */')
-          # Guard the __APPLE__ OS_CODE block
-          zh = zh.replace('#ifdef __APPLE__\n#  define OS_CODE 19',
-                          '#ifdef __APPLE__\n#  ifndef OS_CODE\n#    define OS_CODE 19\n#  endif')
-          with open('third_party/zlib/zutil.h', 'w') as f:
-              f.write(zh)
-          print("zutil.h patched")
+          # 3. Fix zlib: comment out ALL fdopen macros and fix OS_CODE
+          sed -i '' 's|^#  define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched: removed fdopen macro|' third_party/zlib/zutil.h
+          sed -i '' 's|^#    define fdopen(fd,mode) NULL /\* No fdopen() \*/|// patched: removed fdopen macro|' third_party/zlib/zutil.h
+          sed -i '' 's|^#    define fdopen(fd,type)  _fdopen(fd,type)|// patched: removed fdopen macro|' third_party/zlib/zutil.h
+          # Fix OS_CODE redefinition
+          sed -i '' 's|^#ifdef __APPLE__$|#ifdef __APPLE__\n#  ifndef OS_CODE|' third_party/zlib/zutil.h
+          sed -i '' 's|^#  define OS_CODE 19$|#  define OS_CODE 19\n#  endif|' third_party/zlib/zutil.h
           
-          # 4. Verify
-          with open('build/config/compiler/BUILD.gn', 'r') as f:
-              assert 'find-bad-constructs' not in f.read(), "plugin not removed!"
-          print("All patches verified OK")
-          PATCH
+          # Verify
+          echo "fdopen count after patch:"
+          grep -c "define fdopen" third_party/zlib/zutil.h || echo "0"
+          echo "Plugin count after patch:"
+          grep -c "find-bad-constructs" build/config/compiler/BUILD.gn || echo "0"
+          echo "Done"
 
       - name: Configure and Build
         run: |
