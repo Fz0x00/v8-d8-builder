@@ -56,22 +56,15 @@ jobs:
           with open('src/compiler/backend/instruction-codes.h', 'w') as f:
               f.write(ic)
 
-          # 3. bit-field.h: nuclear fix - replace the entire kMax line
+          # 3. bit-field.h: fix constexpr kMax for Clang 21
           with open('src/base/bit-field.h') as f:
               bf = f.read()
-          # Replace the constexpr kMax with a simpler non-constexpr approach
+          # Use the original line but wrap kMax init to avoid static_cast issue
           bf = bf.replace(
               'static constexpr T kMax = static_cast<T>(kNumValues - 1);',
-              'static const T kMax;')
+              'static constexpr T kMax = T{} < T{-1} ? static_cast<T>(kNumValues - 1) : static_cast<T>(kNumValues - 1);')
           with open('src/base/bit-field.h', 'w') as f:
               f.write(bf)
-
-          # Add out-of-class definition at end of file
-          with open('src/base/bit-field.h', 'a') as f:
-              f.write('\n// Out-of-class definition for constexpr kMax\n')
-              f.write('template <typename T, int kShift, int kSize, typename U>\n')
-              f.write('const T BitField<T, kShift, kSize, U>::kMax = '
-                      'static_cast<T>(static_cast<U>(kNumValues - 1));\n')
 
           # 4. zutil.h: comment out ALL #define fdopen lines
           with open('third_party/zlib/zutil.h') as f:
