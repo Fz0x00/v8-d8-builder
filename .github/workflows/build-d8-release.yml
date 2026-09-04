@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       v8_version:
-        description: 'V8 commit hash or version tag (e.g., 10.2.154.26)'
+        description: 'V8 version tag (e.g., 10.2.154.26)'
         required: false
         default: '10.2.154.26'
         type: string
@@ -15,101 +15,43 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container:
-      image: var77/v8-docker-build:latest
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      
-      - name: Get V8 commit info
-        id: v8_info
+      - name: Install dependencies
         run: |
-          set -e
-          
-          V8_VERSION="${{ github.event.inputs.v8_version || '10.2.154.26' }}"
-          
-          # Clone depot_tools
-          if [ ! -d "depot_tools" ]; then
-            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-          fi
-          export PATH="$PATH:$PWD/depot_tools"
-          
-          # Create working directory
+          sudo apt-get update
+          sudo apt-get install -y python3 pkg-config libnss3-dev libatk1.0-dev \
+            libdrm-dev libxkbcommon-dev libxcomposite-dev libxdamage-dev \
+            libxrandr-dev libgbm-dev libpango-1.0-dev libcairo2-dev \
+            libasound2-dev libcups2-dev libgtk-3-dev libxss-dev
+      
+      - name: Install depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$PWD/depot_tools" >> $GITHUB_PATH
+      
+      - name: Fetch V8
+        run: |
           mkdir -p build && cd build
-          
-          # Fetch V8
           fetch v8
           cd v8
-          
-          # Checkout specific version
-          echo "Checking out version: $V8_VERSION"
-          git checkout "$V8_VERSION" || {
-            echo "Trying as tag..."
-            git fetch origin "refs/tags/$V8_VERSION:refs/tags/$V8_VERSION" && git checkout "$V8_VERSION"
-          }
-          
-          # Get commit info
-          V8_COMMIT=$(git log -1 --format='%H')
-          V8_COMMIT_SHORT=$(git log -1 --format='%h')
-          V8_COMMIT_MSG=$(git log -1 --format='%s')
-          
-          # Get V8 version from BUILD.gn
-          V8_VERSION_TAG=$(grep -oP 'v8_major = \K\d+' BUILD.gn 2>/dev/null || echo "")
-          if [ -n "$V8_VERSION_TAG" ]; then
-            V8_VERSION_FULL=$(grep -oP 'v8_minor = \d+\s+v8_buildnum = \K\d+' BUILD.gn 2>/dev/null || echo "0")
-            V8_VERSION_PATCH=$(grep -oP 'v8_patch = \K\d+' BUILD.gn 2>/dev/null || echo "0")
-            V8_VERSION_STRING="${V8_VERSION_TAG}.${V8_VERSION_FULL}.${V8_VERSION_PATCH}"
-          else
-            V8_VERSION_STRING=""
-          fi
-          
-          echo "V8 commit: $V8_COMMIT"
-          echo "V8 commit message: $V8_COMMIT_MSG"
-          echo "V8 version string: ${V8_VERSION_STRING:-unknown}"
-          
-          # Generate tag
-          TAG="v8-${V8_COMMIT_SHORT}-release"
-          
-          # Generate release name
-          if [ -n "$V8_VERSION_STRING" ]; then
-            RELEASE_NAME="V8 ${V8_VERSION_STRING} d8 (release) - ${V8_COMMIT_SHORT}"
-          else
-            RELEASE_NAME="V8 d8 (release) - ${V8_COMMIT_SHORT}"
-          fi
-          
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-          echo "RELEASE_NAME=$RELEASE_NAME" >> $GITHUB_OUTPUT
-          echo "V8_COMMIT=$V8_COMMIT" >> $GITHUB_OUTPUT
-          echo "V8_COMMIT_SHORT=$V8_COMMIT_SHORT" >> $GITHUB_OUTPUT
-          echo "V8_COMMIT_MSG=$V8_COMMIT_MSG" >> $GITHUB_OUTPUT
-          echo "V8_VERSION_STRING=${V8_VERSION_STRING:-unknown}" >> $GITHUB_OUTPUT
-          
-          echo "Tag: $TAG"
-          echo "Release name: $RELEASE_NAME"
+          git checkout "${{ github.event.inputs.v8_version || '10.2.154.26' }}"
+          echo "V8 commit: $(git log -1 --format='%H %s')"
       
-      - name: Build release d8
+      - name: Patch DCHECK_ALWAYS_ON
         run: |
-          set -e
-          
-          V8_VERSION="${{ github.event.inputs.v8_version || '10.2.154.26' }}"
-          
-          echo "Building RELEASE d8 for V8 $V8_VERSION"
-          
-          # Clone depot_tools
-          if [ ! -d "depot_tools" ]; then
-            git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          cd build/v8
+          # Remove DCHECK_ALWAYS_ON from Chromium build config
+          if [ -f build/config/BUILD.gn ]; then
+            sed -i 's/defines += \[ "DCHECK_ALWAYS_ON=1" \]/# DISABLED: DCHECK_ALWAYS_ON for release build/' build/config/BUILD.gn
+            echo "DCHECK_ALWAYS_ON patched"
           fi
-          export PATH="$PATH:$PWD/depot_tools"
-          
+          grep -n "DCHECK_ALWAYS_ON" build/config/BUILD.gn || echo "Confirmed: DCHECK_ALWAYS_ON removed"
+      
+      - name: Configure and Build
+        run: |
           cd build/v8
           
-          echo "Current V8 commit: $(git log -1 --format='%H %s')"
-          
-          # Release build configuration - NO debug checks
-          echo "Using Release configuration (is_debug=false)"
           cat > args.gn << 'EOF'
           is_debug = false
           is_component_build = false
@@ -123,81 +65,55 @@ jobs:
           use_lld = true
           clang_use_chrome_plugins = false
           v8_enable_sandbox = false
-          # Critical: disable DCHECK_ALWAYS_ON for exploit testing
           v8_enable_debugging_features = false
-          # Disable slow assertions
           v8_enable_slow_dchecks = false
+          v8_enable_backtrace = true
+          v8_enable_disassembler = true
           EOF
           
-          # Generate build files
-          echo "Generating build files..."
           gn gen out.gn/x64.release
-          
-          # Build d8
-          echo "Building d8..."
           ninja -C out.gn/x64.release d8
           
           echo "Build completed!"
           ls -lh out.gn/x64.release/d8
-          
-          # Copy d8 and dependencies
-          cp out.gn/x64.release/d8 ./d8-release
-          cp out.gn/x64.release/libv8.so ./ 2>/dev/null || true
-          cp out.gn/x64.release/libv8_libbase.so ./ 2>/dev/null || true
-          cp out.gn/x64.release/libv8_libplatform.so ./ 2>/dev/null || true
-          cp out.gn/x64.release/libchrome.so ./ 2>/dev/null || true
-          # Copy snapshot if exists
-          cp out.gn/x64.release/snapshot_blob.bin ./ 2>/dev/null || true
-          
-          # Verify it's a release build
-          echo "Verifying release build..."
-          ./d8-release --version || true
-          
-          # Quick test
-          echo "print('Release d8 works!');" > /tmp/test-release.js
-          ./d8-release /tmp/test-release.js || echo "Note: may need LD_LIBRARY_PATH"
+      
+      - name: Test d8
+        run: |
+          cd build/v8
+          echo "print('Release d8 works! V8 version:')" > /tmp/test.js
+          out.gn/x64.release/d8 /tmp/test.js || true
+          out.gn/x64.release/d8 --version 2>&1 || true
+      
+      - name: Package
+        run: |
+          cd build/v8
+          mkdir -p d8-dist
+          cp out.gn/x64.release/d8 d8-dist/
+          cp out.gn/x64.release/libv8.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/libv8_libbase.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/libv8_libplatform.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/snapshot_blob.bin d8-dist/ 2>/dev/null || true
+          tar czf d8-release-linux-x64.tar.gz -C d8-dist .
       
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ steps.v8_info.outputs.TAG }}
-          name: ${{ steps.v8_info.outputs.RELEASE_NAME }}
+          tag_name: "v8-${{ github.event.inputs.v8_version || '10.2.154.26' }}-release"
+          name: "V8 ${{ github.event.inputs.v8_version || '10.2.154.26' }} d8 (release, no DCHECK)"
           body: |
-            ## V8 d8 Release Build (for CVE testing)
+            ## V8 d8 Release Build (DCHECK disabled)
             
-            **V8 Version:** ${{ steps.v8_info.outputs.V8_VERSION_STRING }}
-            **V8 Commit:** [`${{ steps.v8_info.outputs.V8_COMMIT_SHORT }}`](https://chromium.googlesource.com/v8/v8/+/${{ steps.v8_info.outputs.V8_COMMIT }})
-            **Commit Message:** ${{ steps.v8_info.outputs.V8_COMMIT_MSG }}
+            **V8 Version:** ${{ github.event.inputs.v8_version || '10.2.154.26' }}
             
-            ### Build Configuration
+            ### Key Changes
+            - `is_debug = false` 
+            - `DCHECK_ALWAYS_ON` removed from build config
+            - `v8_enable_debugging_features = false`
             
-            ```gn
-            is_debug = false
-            v8_enable_debugging_features = false
-            v8_enable_slow_dchecks = false
-            v8_use_external_startup_data = false
-            use_custom_libcxx = false
-            ```
-            
-            ### Key Difference from Debug Build
-            
-            This release build has:
-            - `is_debug = false` - No debug assertions
-            - `v8_enable_debugging_features = false` - No DCHECK_ALWAYS_ON
-            - This allows CVE exploits to run without hitting debug checks
-            
-            ### Usage
-            
-            ```bash
-            chmod +x d8-release
-            ./d8-release --allow-natives-syntax exploit.js
-            ```
+            This allows CVE exploits to run without hitting debug assertion checks.
           files: |
-            build/v8/d8-release
-            build/v8/libv8*.so
-            build/v8/snapshot_blob.bin
+            d8-release-linux-x64.tar.gz
           draft: false
           prerelease: true
-          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
