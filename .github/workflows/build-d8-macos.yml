@@ -56,7 +56,23 @@ jobs:
           with open('src/compiler/backend/instruction-codes.h', 'w') as f:
               f.write(ic)
 
-          # 3. zutil.h: comment out ALL #define fdopen lines
+          # 3. bit-field.h: nuclear fix - remove constexpr from kMax
+          with open('src/base/bit-field.h') as f:
+              bf = f.read()
+          bf = bf.replace(
+              'static constexpr T kMax = static_cast<T>(kNumValues - 1);',
+              'static const T kMax;')
+          # Insert out-of-class definition before closing namespace
+          bf = bf.replace(
+              '}  // namespace base\n}  // namespace v8',
+              'template <typename T, int kShift, int kSize, typename U>\n'
+              'const T BitField<T, kShift, kSize, U>::kMax = '
+              'static_cast<T>(kNumValues - 1);\n\n'
+              '}  // namespace base\n}  // namespace v8')
+          with open('src/base/bit-field.h', 'w') as f:
+              f.write(bf)
+
+          # 4. zutil.h: comment out ALL #define fdopen lines
           with open('third_party/zlib/zutil.h') as f:
               lines = f.readlines()
           new_lines = []
@@ -92,7 +108,6 @@ jobs:
           is_clang = true
           use_lld = false
           clang_use_chrome_plugins = false
-          cxx_standard = 17
           EOF
           
           gn gen out.gn/arm64.release
