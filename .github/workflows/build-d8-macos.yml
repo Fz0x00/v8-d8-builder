@@ -56,15 +56,16 @@ jobs:
           with open('src/compiler/backend/instruction-codes.h', 'w') as f:
               f.write(ic)
 
-          # 3. bit-field.h: fix constexpr kMax for Clang 21
+          # 3. bit-field.h: nuclear fix - completely rewrite kMax
           with open('src/base/bit-field.h') as f:
-              bf = f.read()
-          # Use the original line but wrap kMax init to avoid static_cast issue
-          bf = bf.replace(
+              content = f.read()
+          # Replace the constexpr line with a workaround that compiles on Clang 21
+          content = content.replace(
               'static constexpr T kMax = static_cast<T>(kNumValues - 1);',
-              'static constexpr T kMax = T{} < T{-1} ? static_cast<T>(kNumValues - 1) : static_cast<T>(kNumValues - 1);')
+              'static constexpr U kMaxStorage = kNumValues - 1;\n'
+              '  static constexpr T kMax = T(kMaxStorage);')
           with open('src/base/bit-field.h', 'w') as f:
-              f.write(bf)
+              f.write(content)
 
           # 4. zutil.h: comment out ALL #define fdopen lines
           with open('third_party/zlib/zutil.h') as f:
