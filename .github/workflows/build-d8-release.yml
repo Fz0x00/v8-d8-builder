@@ -35,6 +35,12 @@ jobs:
           git checkout "${{ github.event.inputs.v8_version || '10.2.154.26' }}"
           echo "V8 commit: $(git log -1 --format='%H %s')"
       
+      - name: Sync dependencies
+        run: |
+          cd build/v8
+          gclient sync -D --with_branch_heads -R
+          echo "gclient sync completed"
+      
       - name: Patch DCHECK_ALWAYS_ON
         run: |
           cd build/v8
