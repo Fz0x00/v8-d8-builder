@@ -72,8 +72,6 @@ jobs:
           v8_enable_slow_dchecks = false
           v8_enable_backtrace = true
           v8_enable_disassembler = true
-          use_gold = false
-          use_sysroot = false
           EOF
           
           gn gen out.gn/x64.release
