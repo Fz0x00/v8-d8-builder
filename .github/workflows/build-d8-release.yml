@@ -96,7 +96,7 @@ jobs:
           cp out.gn/x64.release/libv8_libbase.so d8-dist/ 2>/dev/null || true
           cp out.gn/x64.release/libv8_libplatform.so d8-dist/ 2>/dev/null || true
           cp out.gn/x64.release/snapshot_blob.bin d8-dist/ 2>/dev/null || true
-          tar czf d8-release-linux-x64.tar.gz -C d8-dist .
+          tar czf $GITHUB_WORKSPACE/d8-release-linux-x64.tar.gz -C d8-dist .
       
       - name: Create Release
         uses: softprops/action-gh-release@v3
