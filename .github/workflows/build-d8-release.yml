@@ -98,18 +98,18 @@ jobs:
           cp out.gn/x64.release/libv8_libbase.so d8-dist/ 2>/dev/null || true
           cp out.gn/x64.release/libv8_libplatform.so d8-dist/ 2>/dev/null || true
           cp out.gn/x64.release/snapshot_blob.bin d8-dist/ 2>/dev/null || true
-          # Find and copy the custom libc++ from the build tree
-          find . -maxdepth 5 -name "libc++.so" -o -name "libc++.so.*" 2>/dev/null | head -10
-          # Copy custom libc++ if found in buildtools
-          cp buildtools/third_party/libc++/libc++.so d8-dist/ 2>/dev/null || true
-          # Or from the cipd toolchain
-          find third_party/llvm-build -maxdepth 4 -name "libc++.so*" 2>/dev/null | while read f; do cp "$f" d8-dist/; done
-          # Also check obj/buildtools
-          find out.gn/x64.release/obj/buildtools -name "libc++*" -exec file {} \; 2>/dev/null | head -5
+          # Copy custom libc++ and other needed shared libs
+          cp out.gn/x64.release/libc++.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/libc++abi.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/libchrome_zlib.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/libicui18n.so d8-dist/ 2>/dev/null || true
+          cp out.gn/x64.release/libicuuc.so d8-dist/ 2>/dev/null || true
+          # Also check for any other needed libs
+          find out.gn/x64.release -maxdepth 1 -name "*.so" -exec cp {} d8-dist/ \; 2>/dev/null || true
           echo "=== d8-dist ==="
           ls -la d8-dist/
           echo "=== ldd ==="
-          LD_LIBRARY_PATH=$(pwd)/d8-dist ldd out.gn/x64.release/d8 2>/dev/null | grep -E "not found|libc" || true
+          LD_LIBRARY_PATH=$(pwd)/d8-dist ldd out.gn/x64.release/d8 2>/dev/null || true
           tar czf $GITHUB_WORKSPACE/d8-release-linux-x64.tar.gz -C d8-dist .
       
       - name: Create Release
