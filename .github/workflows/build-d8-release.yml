@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       v8_version:
-        description: 'V8 version tag (e.g., 10.2.154.26)'
+        description: 'V8 version tag (e.g., 10.2.154.26, 12.3.219.9)'
         required: false
         default: '10.2.154.26'
         type: string
@@ -15,18 +15,18 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y python3 pkg-config git curl wget
-      
+
       - name: Install depot_tools
         run: |
           git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
           echo "$PWD/depot_tools" >> $GITHUB_PATH
-      
+
       - name: Fetch V8
         run: |
           mkdir -p build && cd build
@@ -34,27 +34,24 @@ jobs:
           cd v8
           git checkout "${{ github.event.inputs.v8_version || '10.2.154.26' }}"
           echo "V8 commit: $(git log -1 --format='%H %s')"
-      
+
       - name: Sync dependencies
         run: |
           cd build/v8
           gclient sync -D --with_branch_heads -R
           echo "gclient sync completed"
-      
-      - name: Patch DCHECK_ALWAYS_ON
-        run: |
-          cd build/v8
-          # Remove DCHECK_ALWAYS_ON from Chromium build config
-          if [ -f build/config/BUILD.gn ]; then
-            sed -i 's/defines += \[ "DCHECK_ALWAYS_ON=1" \]/# DISABLED: DCHECK_ALWAYS_ON for release build/' build/config/BUILD.gn
-            echo "DCHECK_ALWAYS_ON patched"
-          fi
-          grep -n "DCHECK_ALWAYS_ON" build/config/BUILD.gn || echo "Confirmed: DCHECK_ALWAYS_ON removed"
-      
+
+
       - name: Configure and Build
         run: |
           cd build/v8
-          
+
+          # NOTE on DCHECKs: DEBUG (and thus DCHECK) is defined when EITHER
+          #   v8_enable_debugging_features = true   (V8 BUILD.gn)
+          #   OR dcheck_always_on = true            (else-if branch, same file)
+          # dcheck_is_configurable must NOT be used: in gn it can force
+          # dcheck_always_on back to true. Full %DebugPrint output only needs
+          # v8_enable_object_print, which does NOT define DEBUG.
           cat > args.gn << 'EOF'
           is_debug = false
           is_component_build = false
@@ -68,64 +65,91 @@ jobs:
           use_lld = true
           clang_use_chrome_plugins = false
           v8_enable_sandbox = false
-          v8_enable_debugging_features = true
-          v8_enable_slow_dchecks = false
-          v8_enable_backtrace = true
+          v8_enable_debugging_features = false
+          v8_enable_object_print = true
           v8_enable_disassembler = true
+          v8_enable_test_features = true
+          v8_enable_verify_heap = false
+          v8_enable_debug_code = false
+          v8_enable_v8_checks = false
+          cppgc_enable_verify_heap = false
+          v8_enable_slow_dchecks = false
+          dcheck_always_on = false
           EOF
-          
+
           gn gen out.gn/x64.release
-          ninja -C out.gn/x64.release d8
-          
+          ninja -C out.gn/x64.release d8 -j2
+
           echo "Build completed!"
           ls -lh out.gn/x64.release/d8
-      
+
+      - name: Verify build config (no DCHECK, natives + object print on)
+        run: |
+          cd build/v8
+          for arg in v8_enable_debugging_features dcheck_always_on v8_enable_object_print v8_enable_debug_code v8_enable_verify_heap; do
+            echo -n "$arg = "
+            gn args out.gn/x64.release --list=$arg --short | head -1
+          done
+          # Hard gate: abort packaging if DCHECK-enabling flags are on
+          if gn args out.gn/x64.release --list=v8_enable_debugging_features --short | grep -q "true"; then
+            echo "::error::v8_enable_debugging_features is ON - DCHECKs would be compiled in"
+            exit 1
+          fi
+          if gn args out.gn/x64.release --list=dcheck_always_on --short | grep -q "true"; then
+            echo "::error::dcheck_always_on is ON - DCHECKs would be compiled in"
+            exit 1
+          fi
+          if gn args out.gn/x64.release --list=v8_enable_object_print --short | grep -q "false"; then
+            echo "::error::v8_enable_object_print is OFF - %DebugPrint output would be useless"
+            exit 1
+          fi
+
       - name: Test d8
         run: |
           cd build/v8
-          echo "print('Release d8 works! V8 version:')" > /tmp/test.js
-          out.gn/x64.release/d8 /tmp/test.js || true
-          out.gn/x64.release/d8 --version 2>&1 || true
-      
+          cat > /tmp/test.js << 'EOF'
+          var o = {a: 1, b: 2};
+          %DebugPrint(o);
+          print("natives + object print OK");
+          function f(x) { return x + 1; }
+          %PrepareFunctionForOptimization(f);
+          f(1); f(2);
+          %OptimizeFunctionOnNextCall(f);
+          f(3);
+          print("TurboFan optimization OK, status: " + %GetOptimizationStatus(f));
+          EOF
+          out.gn/x64.release/d8 --allow-natives-syntax /tmp/test.js
+
       - name: Package
         run: |
           cd build/v8
           mkdir -p d8-dist
           cp out.gn/x64.release/d8 d8-dist/
-          cp out.gn/x64.release/libv8.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/libv8_libbase.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/libv8_libplatform.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/snapshot_blob.bin d8-dist/ 2>/dev/null || true
-          # Copy custom libc++ and other needed shared libs
-          cp out.gn/x64.release/libc++.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/libc++abi.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/libchrome_zlib.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/libicui18n.so d8-dist/ 2>/dev/null || true
-          cp out.gn/x64.release/libicuuc.so d8-dist/ 2>/dev/null || true
-          # Also check for any other needed libs
-          find out.gn/x64.release -maxdepth 1 -name "*.so" -exec cp {} d8-dist/ \; 2>/dev/null || true
+          for f in out.gn/x64.release/*.so out.gn/x64.release/*.so.* out.gn/x64.release/snapshot_blob.bin; do
+            [ -e "$f" ] && cp "$f" d8-dist/ || true
+          done
           echo "=== d8-dist ==="
           ls -la d8-dist/
           echo "=== ldd ==="
           LD_LIBRARY_PATH=$(pwd)/d8-dist ldd out.gn/x64.release/d8 2>/dev/null || true
           tar czf $GITHUB_WORKSPACE/d8-release-linux-x64.tar.gz -C d8-dist .
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: "v8-${{ github.event.inputs.v8_version || '10.2.154.26' }}-release"
           name: "V8 ${{ github.event.inputs.v8_version || '10.2.154.26' }} d8 (release, no DCHECK)"
           body: |
-            ## V8 d8 Release Build (DCHECK disabled)
-            
+            ## V8 d8 Release Build (no DCHECK, natives + object print enabled)
+
             **V8 Version:** ${{ github.event.inputs.v8_version || '10.2.154.26' }}
-            
-            ### Key Changes
-            - `is_debug = false` 
-            - `DCHECK_ALWAYS_ON` removed from build config
-            - `v8_enable_debugging_features = false`
-            
-            This allows CVE exploits to run without hitting debug assertion checks.
+
+            ### Key Build Flags
+            - `is_debug = false`, `dcheck_always_on = false`, no `dcheck_is_configurable`
+            - `v8_enable_debugging_features = false` → no `DEBUG` define → DCHECKs compiled out
+            - `v8_enable_object_print = true` → full `%DebugPrint` output
+            - `v8_enable_test_features = true` → `--allow-natives-syntax` natives available
+            - `v8_enable_sandbox = false`
           files: |
             d8-release-linux-x64.tar.gz
           draft: false
