@@ -1,0 +1,59 @@
+name: Build d8 (macOS arm64 Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      v8_version:
+        description: 'V8 version tag (e.g., 11.6.189.20)'
+        required: false
+        default: '11.6.189.20'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Install dependencies
+        run: |
+          brew install ninja || true
+
+      - name: Install depot_tools
+        run: |
+          git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          echo "$PWD/depot_tools" >> $GITHUB_PATH
+
+      - name: Fetch V8
+        run: |
+          mkdir -p build && cd build
+          fetch v8
+          cd v8
+          git checkout "${{ github.event.inputs.v8_version || '11.6.189.20' }}"
+
+      - name: Sync dependencies
+        run: |
+          cd build/v8
+          gclient sync -D --with_branch_heads -R
+
+      - name: Configure and Build
+        run: |
+          cd build/v8
+          GNARGS='is_debug=false is_component_build=false v8_static_library=true v8_use_external_startup_data=false use_custom_libcxx=true v8_enable_i18n_support=false target_cpu="arm64" treat_warnings_as_errors=false is_clang=true v8_enable_sandbox=false v8_enable_debugging_features=false v8_enable_object_print=true v8_enable_disassembler=true v8_enable_test_features=true v8_enable_verify_heap=false v8_enable_debug_code=false v8_enable_v8_checks=false cppgc_enable_verify_heap=false v8_enable_slow_dchecks=false dcheck_always_on=false'
+          gn gen out.gn/arm64.release --args="$GNARGS"
+          ninja -C out.gn/arm64.release d8
+          ./out.gn/arm64.release/d8 -e 'print("d8 ok " + version())'
+
+      - name: Package
+        run: |
+          cd build/v8/out.gn/arm64.release
+          tar czf $GITHUB_WORKSPACE/d8-macos-arm64.tar.gz d8 snapshot_blob.bin 2>/dev/null || tar czf $GITHUB_WORKSPACE/d8-macos-arm64.tar.gz d8
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: d8-macos-arm64-${{ github.event.inputs.v8_version || '11.6.189.20' }}
+          path: d8-macos-arm64.tar.gz
+          retention-days: 90
