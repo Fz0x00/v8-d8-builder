@@ -49,35 +49,15 @@ jobs:
           # NOTE on DCHECKs: DEBUG (and thus DCHECK) is defined when EITHER
           #   v8_enable_debugging_features = true   (V8 BUILD.gn)
           #   OR dcheck_always_on = true            (else-if branch, same file)
-          # dcheck_is_configurable must NOT be used: in gn it can force
-          # dcheck_always_on back to true. Full %DebugPrint output only needs
-          # v8_enable_object_print, which does NOT define DEBUG.
-          cat > args.gn << 'EOF'
-          is_debug = false
-          is_component_build = false
-          v8_static_library = true
-          v8_use_external_startup_data = false
-          use_custom_libcxx = true
-          v8_enable_i18n_support = false
-          target_cpu = "x64"
-          treat_warnings_as_errors = false
-          is_clang = true
-          use_lld = true
-          clang_use_chrome_plugins = false
-          v8_enable_sandbox = false
-          v8_enable_debugging_features = false
-          v8_enable_object_print = true
-          v8_enable_disassembler = true
-          v8_enable_test_features = true
-          v8_enable_verify_heap = false
-          v8_enable_debug_code = false
-          v8_enable_v8_checks = false
-          cppgc_enable_verify_heap = false
-          v8_enable_slow_dchecks = false
-          dcheck_always_on = false
-          EOF
+          # Full %DebugPrint output only needs v8_enable_object_print.
+          # Args are passed via --args on the command line: on V8 12.x a
+          # source-root args.gn proved unreliable (12.3 gate caught
+          # v8_enable_debugging_features resolving true despite args.gn).
+          GN_ARGS='is_debug=false is_component_build=false v8_static_library=true v8_use_external_startup_data=false use_custom_libcxx=true v8_enable_i18n_support=false target_cpu="x64" treat_warnings_as_errors=false is_clang=true use_lld=true clang_use_chrome_plugins=false v8_enable_sandbox=false v8_enable_debugging_features=false v8_enable_object_print=true v8_enable_disassembler=true v8_enable_test_features=true v8_enable_verify_heap=false v8_enable_debug_code=false v8_enable_v8_checks=false cppgc_enable_verify_heap=false v8_enable_slow_dchecks=false dcheck_always_on=false'
 
-          gn gen out.gn/x64.release
+          gn gen out.gn/x64.release --args="$GN_ARGS"
+          echo "=== resolved args (out dir args.gn as written by gn) ==="
+          cat out.gn/x64.release/args.gn
           ninja -C out.gn/x64.release d8 -j2
 
           echo "Build completed!"
