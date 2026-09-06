@@ -20,6 +20,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew install ninja || true
+          python3 -m pip install --break-system-packages setuptools || python3 -m pip install setuptools || true
 
       - name: Install depot_tools
         run: |
