@@ -68,7 +68,7 @@ jobs:
           use_lld = true
           clang_use_chrome_plugins = false
           v8_enable_sandbox = false
-          v8_enable_debugging_features = false
+          v8_enable_debugging_features = true
           v8_enable_slow_dchecks = false
           v8_enable_backtrace = true
           v8_enable_disassembler = true
