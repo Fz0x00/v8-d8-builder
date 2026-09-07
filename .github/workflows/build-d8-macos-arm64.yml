@@ -37,11 +37,12 @@ jobs:
       - name: Sync dependencies
         run: |
           cd build/v8
-          # depot_tools' python3 (now first in PATH) runs the hooks and needs
-          # pkg_resources; setuptools is not preinstalled on current runners
-          python3 -m pip install --break-system-packages 'setuptools<81' || true   # setuptools>=81 removed pkg_resources
-          python3 -c "import pkg_resources; print('pkg_resources ok')"
-          gclient sync -D --with_branch_heads -R
+          # skip all DEPS hooks: mac_toolchain.py needs pkg_resources which no
+          # longer exists in modern python/setuptools. Manually run only the
+          # clang hook; fall back to the runner's system Xcode SDK.
+          gclient sync -D --with_branch_heads -R --nohooks
+          python3 tools/clang/scripts/update.py || true
+          python3 build/mac_toolchain.py || true
 
       - name: Configure and Build
         run: |
