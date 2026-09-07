@@ -37,6 +37,7 @@ jobs:
       - name: Sync dependencies
         run: |
           cd build/v8
+          export DEPOT_TOOLS_MAC_TOOLCHAIN=0
           gclient sync -D --with_branch_heads -R
 
       - name: Configure and Build
