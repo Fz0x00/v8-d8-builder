@@ -44,6 +44,11 @@ jobs:
           python3 tools/clang/scripts/update.py || true
           python3 build/mac_toolchain.py || true
 
+      - name: Patch selector with ZE tracing
+        run: |
+          cd build/v8
+          python3 "$GITHUB_WORKSPACE/tools/ze_patch.py" src/compiler/backend/instruction-selector.cc
+
       - name: Configure and Build
         run: |
           cd build/v8
