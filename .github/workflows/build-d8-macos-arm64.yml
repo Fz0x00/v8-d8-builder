@@ -17,6 +17,9 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Install dependencies
         run: |
           brew install ninja || true
