@@ -37,7 +37,10 @@ jobs:
       - name: Sync dependencies
         run: |
           cd build/v8
-          export DEPOT_TOOLS_MAC_TOOLCHAIN=0
+          # depot_tools' python3 (now first in PATH) runs the hooks and needs
+          # pkg_resources; setuptools is not preinstalled on current runners
+          python3 -m pip install --break-system-packages setuptools || python3 -m pip install setuptools || true
+          python3 -c "import pkg_resources; print('pkg_resources ok')"
           gclient sync -D --with_branch_heads -R
 
       - name: Configure and Build
